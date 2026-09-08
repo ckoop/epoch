@@ -607,7 +607,8 @@ Alle drei Beschreibungs-Felder (Timer-Start, manueller Eintrag, Eintrag bearbeit
 
 ### Zeitdarstellung
 - Backend speichert **UTC**, Frontend zeigt Lokalzeit via `toLocaleTimeString('de-DE')`
-- Manuelle Einträge: `HH:MM`-Eingabe → `_parse_hhmm(date, hhmm)` → UTC-Datetime
+- Manuelle Einträge: Frontend rechnet `HH:MM`-Eingabe erst per `localTimeToUTC()` in UTC um, danach `_parse_hhmm(date, hhmm)` im Backend (baut nur noch das naive UTC-Datetime zusammen, ohne selbst zu konvertieren)
+- Mail-Import: Uhrzeiten in der Mail sind Europe/Berlin-Ortszeit — `poll_imap_once()` rechnet sie serverseitig über `_local_hhmm_to_utc()` (`zoneinfo.ZoneInfo("Europe/Berlin")`) nach UTC um, da hier kein Frontend-Schritt dazwischenliegt
 - `fmtTime(isoStr)` — UTC-ISO → lokale Uhrzeit `"14:37"`
 - `fmtMinutes(min)` — `"1h 23min"`
 - `fmtDuration(ms)` — `"01:23:45"`
@@ -658,7 +659,7 @@ Manche Browser-APIs verlangen einen **Secure Context** (HTTPS oder `localhost`) 
 
 - **SQLite** — kein paralleler Schreibzugriff; für Einzel-User ausreichend
 - **IMAP-Polling** — blockierender Call in `run_in_executor`; bei sehr vielen Mails spürbar
-- **Zeitzone** — Backend speichert konsequent UTC (Timer wie manuelle/bearbeitete Einträge, s. `localTimeToUTC`/`utcToLocalTime` in `useTimer.js`), Anzeige rechnet immer in die Browser-Lokalzeit um; bei Zugriff aus unterschiedlichen Zeitzonen zeigt jeder Browser dieselbe absolute Zeit entsprechend seiner eigenen Zeitzone an (kein DB-Problem, aber ggf. gewöhnungsbedürftig bei Multi-Timezone-Nutzung)
+- **Zeitzone** — Backend speichert konsequent UTC (Timer wie manuelle/bearbeitete Einträge, s. `localTimeToUTC`/`utcToLocalTime` in `useTimer.js`), Anzeige rechnet immer in die Browser-Lokalzeit um; bei Zugriff aus unterschiedlichen Zeitzonen zeigt jeder Browser dieselbe absolute Zeit entsprechend seiner eigenen Zeitzone an (kein DB-Problem, aber ggf. gewöhnungsbedürftig bei Multi-Timezone-Nutzung). Mail-Import (`_local_hhmm_to_utc()`) hat mangels Browser-Kontext `Europe/Berlin` **hartkodiert** als Ortszeit der Mail-Uhrzeiten — bei Nutzung aus einer anderen Zeitzone müsste das konfigurierbar gemacht werden (s. App-Versionshistorie 0.7.1)
 - **Keine Authentifizierung** — für lokales Netz ausreichend; für Internet: Basic Auth in Nginx empfohlen
 - **PWA ohne Service Worker** — kein Offline-Betrieb
 - **Schwebendes Fenster (Document Picture-in-Picture)** — nur Desktop-Chromium (Chrome/Edge/Brave ≥ 116); auf Mobil (Android/iOS) fehlt die API in allen Browsern, Button dort ausgeblendet. Zusätzlich verlangt die API einen **Secure Context** (HTTPS oder `localhost`) — über reines HTTP auf einer LAN-IP/einem Hostnamen bleibt der Button ausgeblendet, selbst in einem unterstützten Browser (s. „HTTPS (selbstsigniertes Zertifikat)")
@@ -745,8 +746,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.7.0**
-**Aktuelle Doku-Version: v4.23**
+**Aktuelle App-Version: 0.7.1**
+**Aktuelle Doku-Version: v4.24**
 
 ### App-Versionshistorie
 
@@ -763,6 +764,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.6.0   | Merge `feature/push-notifications`: Web-Push-Benachrichtigungen für laufenden Timer/Pomodoro als Mobile-Pendant zum Schwebenden Fenster (erster Service Worker, `push_subscriptions`-Tabelle, `/api/push/*`, VAPID/`pywebpush`, `PushSettingsCard`), dazu Branch-Badge in der Sidebar für Builds abseits von `main` (s. „Push-Benachrichtigungen im Detail") |
 | 0.6.1   | Fix: Fehlschlagende Service-Worker-Registrierung (z. B. `SecurityError` bei nicht vertrauenswürdigem HTTPS-Zertifikat) wurde in `main.jsx` bisher komplett lautlos verschluckt (`.catch(() => {})`), wodurch der Push-Toggle ohne jeden erkennbaren Grund dauerhaft deaktiviert blieb. Loggt den Fehler jetzt in die Konsole (`console.error`) — kein UI-Verhalten geändert, nur Diagnose beim Debuggen erleichtert (s. „Push-Benachrichtigungen im Detail") |
 | 0.7.0   | Push-Intervall konfigurierbar: neue Singleton-Tabelle `push_settings` (`interval_seconds`, Default 240), `GET`/`PUT /api/push/settings`, `_push_loop()` liest den Wert jetzt aus der DB statt der bisherigen fest verdrahteten `PUSH_INTERVAL_SECONDS`-Konstante. UI dafür in `PushSettingsCard` (`SettingsPage.jsx`) — serverweite Einstellung, gilt für alle Geräte gemeinsam (anders als der Push-Subscribe-Toggle, der pro Gerät ist) |
+| 0.7.1   | Fix: Mail-Import legte Zeitslots mit 2h-Versatz an — die in der Mail eingetragene Uhrzeit (Europe/Berlin-Ortszeit, z.B. „09:00") wurde in `poll_imap_once()` ungeprüft als UTC gespeichert, statt wie bei manuellen Einträgen (s. 0.4.1) erst umgerechnet zu werden. Neuer Helper `_local_hhmm_to_utc()` (`backend/main.py`, nutzt `zoneinfo.ZoneInfo("Europe/Berlin")`) rechnet jetzt auch hier korrekt um, inkl. Sommer-/Winterzeit und Mitternachts-Übergang (Eintrags-`date` wird aus dem umgerechneten UTC-Start abgeleitet, nicht mehr aus dem Mail-Datum) |
 
 ### Doku-Versionshistorie
 
@@ -804,3 +806,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.21   | Push-Notification-Testing über HTTPS/`:3443` dokumentiert: Klick-durch-Ausnahme bei selbstsigniertem Zertifikat reicht für die Service-Worker-Registrierung nicht aus (`SecurityError`), Zertifikat muss zusätzlich als vertrauenswürdige CA importiert werden — Anleitung für Linux-Desktop (NSS/`certutil`), Android und iOS ergänzt (s. „Push-Benachrichtigungen im Detail", App-Versionshistorie 0.6.1); veraltete Let's-Encrypt-Notiz für Mobil-Push-Testing entfernt |
 | v4.22   | Push-Intervall konfigurierbar (neue `push_settings`-Tabelle, `GET`/`PUT /api/push/settings`, `PushSettingsCard`) — DB-Schema- und Endpoint-Tabellen sowie „Push-Benachrichtigungen im Detail" entsprechend ergänzt, veraltete `PUSH_INTERVAL_SECONDS`-Konstante aus der Doku entfernt (s. App-Versionshistorie 0.7.0) |
 | v4.23   | „Pomodoro-Timer im Detail" präzisiert: Ton (Frequenz-Unterschied Arbeit/Pause) und Benachrichtigungen laufen rein clientseitig im offenen Tab, unabhängig von und zusätzlich zu den Web-Push-Benachrichtigungen (Doku, kein Code) |
+| v4.24   | Fix Zeitzonen-Offset beim Mail-Import (s. App-Versionshistorie 0.7.1), Abschnitte „Zeitdarstellung" und „Bekannte Einschränkungen" entsprechend aktualisiert |

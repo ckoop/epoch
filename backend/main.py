@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, 
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from pydantic import BaseModel
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List
 import os, csv, io, json as json_lib, re, logging, asyncio, imaplib, email as email_lib, email.utils, shutil
 from pathlib import Path
@@ -365,6 +366,22 @@ def _parse_hhmm(day: date, hhmm: str) -> datetime:
     try:
         h, m = hhmm.strip().split(":")
         return datetime(day.year, day.month, day.day, int(h), int(m))
+    except Exception:
+        raise HTTPException(400, f"Ungültiges Zeitformat '{hhmm}', erwartet HH:MM")
+
+LOCAL_TZ = ZoneInfo("Europe/Berlin")
+
+def _local_hhmm_to_utc(day: date, hhmm: str) -> datetime:
+    """Wie _parse_hhmm, interpretiert HH:MM aber als Europe/Berlin-Ortszeit und
+    rechnet sie in ein naives UTC-datetime um (DB speichert durchgehend UTC).
+    Wird für den Mail-Import gebraucht, da dort — anders als bei manuellen
+    Einträgen — keine Umrechnung im Frontend (localTimeToUTC) stattfindet."""
+    try:
+        h, m = hhmm.strip().split(":")
+        local_dt = datetime(day.year, day.month, day.day, int(h), int(m), tzinfo=LOCAL_TZ)
+        return local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(400, f"Ungültiges Zeitformat '{hhmm}', erwartet HH:MM")
 
@@ -1198,13 +1215,18 @@ def poll_imap_once():
                     continue
 
                 # All entries valid – commit all at once
+                # Uhrzeiten aus der Mail sind Europe/Berlin-Ortszeit (der Nutzer
+                # tippt "09:00" und meint 9 Uhr deutscher Zeit) und müssen erst
+                # nach UTC umgerechnet werden, bevor sie in die DB geschrieben
+                # werden — die DB speichert durchgehend UTC (vgl. localTimeToUTC
+                # im Frontend für manuelle Einträge).
                 for ep in entries:
-                    start_dt = _parse_hhmm(ep["date"], ep["start"])
-                    end_dt   = _parse_hhmm(ep["date"], ep["end"])
+                    start_dt = _local_hhmm_to_utc(ep["date"], ep["start"])
+                    end_dt   = _local_hhmm_to_utc(ep["date"], ep["end"])
                     dur      = _calc_duration(start_dt, end_dt)
                     db.add(TimeEntry(
                         start_time=start_dt, end_time=end_dt, duration_minutes=dur,
-                        date=ep["date"], project=ep["project"],
+                        date=start_dt.date(), project=ep["project"],
                         description=ep["description"], source=2,
                     ))
                 db.commit()
