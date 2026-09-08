@@ -125,7 +125,7 @@ timetracker/
 | start_time        | DateTime | UTC                                           |
 | end_time          | DateTime | UTC, nullable (= Timer läuft noch)            |
 | duration_minutes  | Float    | Berechnet aus end − start                     |
-| date              | Date     | Lokales Datum des Eintrags                    |
+| date              | Date     | UTC-Datum von `start_time` (**nicht** echtes lokales Datum — bei Einträgen kurz vor/nach Mitternacht Berliner Zeit kann das gespeicherte Datum vom tatsächlichen lokalen Kalendertag abweichen; betrifft alle drei Quellen: Timer läuft im Backend-Container mit UTC-Systemzeit, manuelle Einträge bekommen das UTC-Datum vom Frontend, Mail-Import leitet es aus dem UTC-Start ab) |
 | project           | String   | Freitext — Name des Projekts                  |
 | description       | String   | Optional (bei E-Mail-Import: Pflicht)         |
 | source            | Integer  | 0=Timer, 1=Manuell, 2=E-Mail                 |
@@ -661,31 +661,10 @@ Manche Browser-APIs verlangen einen **Secure Context** (HTTPS oder `localhost`) 
 - **IMAP-Polling** — blockierender Call in `run_in_executor`; bei sehr vielen Mails spürbar
 - **Zeitzone** — Backend speichert konsequent UTC (Timer wie manuelle/bearbeitete Einträge, s. `localTimeToUTC`/`utcToLocalTime` in `useTimer.js`), Anzeige rechnet immer in die Browser-Lokalzeit um; bei Zugriff aus unterschiedlichen Zeitzonen zeigt jeder Browser dieselbe absolute Zeit entsprechend seiner eigenen Zeitzone an (kein DB-Problem, aber ggf. gewöhnungsbedürftig bei Multi-Timezone-Nutzung). Mail-Import (`_local_hhmm_to_utc()`) hat mangels Browser-Kontext `Europe/Berlin` **hartkodiert** als Ortszeit der Mail-Uhrzeiten — bei Nutzung aus einer anderen Zeitzone müsste das konfigurierbar gemacht werden (s. App-Versionshistorie 0.7.1)
 - **Keine Authentifizierung** — für lokales Netz ausreichend; für Internet: Basic Auth in Nginx empfohlen
-- **PWA ohne Service Worker** — kein Offline-Betrieb
+- **Kein Offline-Betrieb** — seit v0.6.0 gibt es einen Service Worker (`public/sw.js`), der ist aber nur für Web-Push zuständig und cached nichts; ohne Netzwerkverbindung lädt die PWA also weiterhin nicht
 - **Schwebendes Fenster (Document Picture-in-Picture)** — nur Desktop-Chromium (Chrome/Edge/Brave ≥ 116); auf Mobil (Android/iOS) fehlt die API in allen Browsern, Button dort ausgeblendet. Zusätzlich verlangt die API einen **Secure Context** (HTTPS oder `localhost`) — über reines HTTP auf einer LAN-IP/einem Hostnamen bleibt der Button ausgeblendet, selbst in einem unterstützten Browser (s. „HTTPS (selbstsigniertes Zertifikat)")
 - **Projekte in Einträgen** — Umbenennen eines Projekts ändert **nicht** die bestehenden Einträge (String-Referenz); bei Umbenennung bleibt der alte Name in historischen Einträgen erhalten
 - **Idle-Erkennung** — basiert auf `visibilitychange`, nicht auf echter Maus-/Tastatur-Inaktivität; erkennt zuverlässig Rechner sperren/Tab wechseln, aber nicht "Tab bleibt offen sichtbar, aber Nutzer ist einfach weg" (z.B. Bildschirm bleibt an); Schwelle ist in den Settings konfigurierbar, aber **pro Gerät** (localStorage) — synct nicht zwischen Geräten wie die Pomodoro-Settings
-
----
-
-## TODO / Geplante Features
-
-### Backup-Lösung für SQLite-Volume
-
-Aktuell kein automatisiertes Backup — die DB liegt ausschließlich im Docker-Volume `timetracker-data` (lokal auf dem Host, s. Architektur oben), ein Datenverlust bei Volume-Löschung/Host-Crash wäre nicht wiederherstellbar.
-
-**Schritte:**
-1. Backup-Skript (`backup.sh`): Hilfscontainer mountet Volume + Zielverzeichnis, packt `timetracker.db` als `tar.gz` mit Datumsstempel
-2. Vor dem Backup Backend kurz stoppen (`docker compose stop backend`) für konsistenten Snapshot, danach wieder starten — Alternative `docker cp` aus laufendem Container ist einfacher, aber nicht garantiert konsistent
-3. Rotation/Aufbewahrung klären (z. B. letzte 7 Tage + letzte 4 Wochen behalten, ältere löschen)
-4. Ablagespeicherort für Backups festlegen (externe Platte, NAS, Cloud-Storage?) — noch offen
-5. Automatisierung per Cron auf dem Host, der `docker compose` ausführt
-
-**Aufwand:** ~1–2 Stunden für Skript + Cron, je nach gewähltem Ablageort ggf. mehr.
-
-**Zu beachten:**
-- Skript muss außerhalb des Repos/Containers laufen (Host-Cron), da es auf den Docker-Socket/Volume-Mount zugreift
-- Restore-Vorgang einmal testen, nicht nur Backup — sonst unklar ob Dump im Ernstfall wirklich nutzbar ist
 
 ---
 
@@ -747,7 +726,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
 **Aktuelle App-Version: 0.7.1**
-**Aktuelle Doku-Version: v4.24**
+**Aktuelle Doku-Version: v4.25**
 
 ### App-Versionshistorie
 
@@ -807,3 +786,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.22   | Push-Intervall konfigurierbar (neue `push_settings`-Tabelle, `GET`/`PUT /api/push/settings`, `PushSettingsCard`) — DB-Schema- und Endpoint-Tabellen sowie „Push-Benachrichtigungen im Detail" entsprechend ergänzt, veraltete `PUSH_INTERVAL_SECONDS`-Konstante aus der Doku entfernt (s. App-Versionshistorie 0.7.0) |
 | v4.23   | „Pomodoro-Timer im Detail" präzisiert: Ton (Frequenz-Unterschied Arbeit/Pause) und Benachrichtigungen laufen rein clientseitig im offenen Tab, unabhängig von und zusätzlich zu den Web-Push-Benachrichtigungen (Doku, kein Code) |
 | v4.24   | Fix Zeitzonen-Offset beim Mail-Import (s. App-Versionshistorie 0.7.1), Abschnitte „Zeitdarstellung" und „Bekannte Einschränkungen" entsprechend aktualisiert |
+| v4.25   | Drei Doku-Korrekturen (Code unverändert): toten „TODO: Backup-Lösung für SQLite-Volume"-Abschnitt entfernt (referenzierte ein Docker-Volume, das seit v4.9 durch einen Bind-Mount ersetzt ist, und war laut v4.11 bereits als entfernt vermerkt); „Bekannte Einschränkungen" zu Service Worker/Offline korrigiert (Service Worker existiert seit v0.6.0, cached aber nichts); Spalte `date` in `time_entries` korrekt als UTC-Datum von `start_time` beschrieben statt als „lokales Datum" |
