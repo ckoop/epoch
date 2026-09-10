@@ -427,13 +427,12 @@ MAX_DAY_MINUTES  = 600   // 10h – Umbuchungsgrenze
 - Jeder Tag mit `diff > 0` zeigt weiterhin `getOvertimeInfo()`-Level (`overtime`/`rebook`, Amber/Rot); Tage mit `diff < 0` bekommen das neue Level `deficit` (neutrales Grau, Minus-Vorzeichen)
 - `>10h`-Warnbanner ("sollten umgebucht werden") nur in dieser Ansicht sichtbar — bezieht sich auf die Tagesgesamtsumme, ergibt pro Projekt keinen Sinn
 
-**Pro Projekt** — verteilt die Tagesabweichung (über **oder** unter 8h) anteilig nach Stundenanteil auf alle an dem Tag gebuchten Projekte, auch wenn ein Projekt für sich allein unter 8h liegt:
-- Für jeden Tag: `dayDiff = Tagessumme − 480min`; pro Projekt `diff = dayDiff × (Projektminuten_am_Tag / Tagessumme)`
-- Summe aller Projekt-`diff`-Werte ergibt exakt denselben Saldo wie die Pro-Tag-Ansicht (auch bei Minusstunden)
-- Pro Projekt wird die Liste der beitragenden Tage mit Datum, gearbeiteter Zeit und anteiligem `diff` angezeigt
-- "Saldo" und "Tage mit Abweichung" oben in der Karte rechnen in dieser Ansicht mit den projektbezogenen Werten, nicht mit der Tagesansicht
+**Pro Projekt** — bewusst einfacher als die Tagesansicht, zählt **nur**, wenn ein einzelnes Projekt an einem Tag für sich genommen mehr als 8h gebucht hat (keine anteilige Verteilung auf mehrere Projekte, keine Minusstunden — auf Wunsch in 0.7.6 wieder von 0.7.2 zurückgebaut):
+- Für jeden Tag und jedes Projekt: `overtime = max(0, Projektminuten_am_Tag − 480min)`
+- Pro Projekt wird die Liste der beitragenden Tage mit Datum angezeigt (wie in der Pro-Tag-Ansicht)
+- "Gesamt" und "Tage mit ÜS" oben in der Karte rechnen in dieser Ansicht mit den projektbezogenen Werten — müssen (bewusst) nicht mit dem Saldo aus der Pro-Tag-Ansicht übereinstimmen
 
-Beispiel (Juli 2026): Tag mit `Support` 5h + `Meeting` 4h (= 9h, +60min) → Support bekommt +33min, Meeting +27min zugerechnet, obwohl keines der beiden Projekte für sich allein über 8h lag. Ein Tag mit nur `Support` 7h (kein weiteres Projekt) ergibt `diff = −60min` und senkt den Saldo entsprechend.
+Beispiel (Juli 2026): 11 Tage mit Tages-Überstunden, aber nur `Support` hatte an 2 Tagen (21.07., 23.07.) allein >8h → 90min Projekt-Überstunden, obwohl `Entwicklung` an einzelnen Tagen ebenfalls beteiligt war (aber nie allein >8h).
 
 ---
 
@@ -729,8 +728,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.7.5**
-**Aktuelle Doku-Version: v4.29**
+**Aktuelle App-Version: 0.7.6**
+**Aktuelle Doku-Version: v4.30**
 
 ### App-Versionshistorie
 
@@ -752,6 +751,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.7.3   | Fix: Überstunden-Karte (Stats-Seite) berücksichtigte bisher nur Tage über 8h — ein Arbeitstag unter 8h (z.B. 7h, kein weiteres Projekt) floss nirgends als Minusstunde ein, der monatliche Saldo war dadurch zu hoch. `overtimeDays`/`overtimeByProject` (`StatsPage.jsx`) bilden jetzt für jeden Arbeitstag die Differenz zu 8h (positiv = Überstunde, negativ = Minusstunde) und summieren beides zu einem echten Saldo („Gesamt"-Kachel umbenannt in „Saldo", kann jetzt negativ sein); in der Pro-Projekt-Ansicht wird auch eine Minusstunde anteilig nach Stundenanteil auf die Projekte des Tages verteilt, analog zur Überstunden-Verteilung aus 0.7.2 |
 | 0.7.4   | Fix: Mail-Import (`_parse_mail_body`, `backend/main.py`) schlug fehl, wenn das Mail-Programm eine lange Zeile beim Klartext-Versand hart umgebrochen hat (z.B. Outlook/Thunderbird ab ~72–78 Zeichen) — die entstandene Fortsetzungszeile hatte keine Pipe-Trennzeichen und riss wegen „Alles-oder-nichts" die komplette Mail. Erste Version einer Zeilen-Zusammenfügung vor der Validierung (abgelöst durch 0.7.5, s. dort) |
 | 0.7.5   | Fix/Nachbesserung zu 0.7.4: die zeilenweise Fortsetzungs-Heuristik aus 0.7.4 griff nicht, wenn eine E-Mail (z.B. nach Deaktivieren des Zeilenumbruchs im Mail-Programm oder durch HTML-zu-Klartext-Konvertierung) komplett OHNE Zeilenumbrüche als eine einzige durchgehende Zeile verschickt wurde — alle Einträge wurden dann fälschlich zu einem einzigen mit Datenmüll in der Beschreibung zusammengefasst. Ersetzt durch `_split_mail_entries()`/`_mail_paragraphs()`: gruppiert zuerst in Absätze (Grenze = Leerzeile oder `>`/`#`-Zeile, verhindert weiterhin, dass z.B. eine Grußformel fälschlich angehängt wird), normalisiert dann jeden Absatz zu einem String und trennt ihn an jeder Stelle auf, an der ein neuer Eintrag beginnt (Datum+Pipe, per Lookahead-Regex) — funktioniert unabhängig davon, ob/wo genau umgebrochen wurde. Fehlermeldungen referenzieren jetzt „Eintrag N" statt einer Zeilennummer (nach der Normalisierung nicht mehr eindeutig). Bekannte Einschränkung: eine fehlerhafte Zeile ohne Pipe-Zeichen, die direkt (ohne Leerzeile) auf einen gültigen Eintrag folgt, wird jetzt still an dessen Beschreibung angehängt statt einen Fehler auszulösen — Daten gehen dabei nicht verloren (nur unerwartet lange Beschreibung), aber die Konsistenzprüfung greift hier nicht mehr |
+| 0.7.6   | Teilweiser Rückbau von 0.7.2/0.7.3: die anteilige Verteilung der Tagesabweichung auf mehrere Projekte (`overtimeByProject`, s. 0.7.2) wurde auf Wunsch wieder auf den Stand vor 0.7.2 zurückgesetzt — „Pro Projekt" zählt wieder nur Tage, an denen ein einzelnes Projekt für sich allein mehr als 8h gebucht hat, keine Minusstunden. Die Tagesansicht und der Saldo (inkl. Minusstunden, s. 0.7.3) bleiben unverändert — Summe „Pro Projekt" muss (bewusst) nicht mehr mit dem Saldo aus „Pro Tag" übereinstimmen |
 
 ### Doku-Versionshistorie
 
@@ -799,3 +799,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.27   | Fix Überstunden-Saldo berücksichtigt jetzt auch Minusstunden (s. App-Versionshistorie 0.7.3), Abschnitt „Monatliche Überstunden (StatsPage)" entsprechend überarbeitet |
 | v4.28   | Fix Mail-Import: hart umgebrochene Zeilen werden vor der Validierung zusammengefügt (s. App-Versionshistorie 0.7.4), Abschnitt „Eingehend (IMAP) — Pflichtformat (Body)" entsprechend ergänzt |
 | v4.29   | Nachbesserung zu v4.28: Mail-Import-Zerlegung robuster gegen komplett unbrochene Zeilen (s. App-Versionshistorie 0.7.5), Abschnitt „Eingehend (IMAP) — Pflichtformat (Body)" entsprechend aktualisiert |
+| v4.30   | Teilweiser Rückbau v4.26: „Pro Projekt" verteilt Überstunden nicht mehr anteilig auf mehrere Projekte (s. App-Versionshistorie 0.7.6), Abschnitt „Monatliche Überstunden (StatsPage)" entsprechend zurückgebaut — Tagesansicht/Saldo (v4.27) bleibt unverändert |
