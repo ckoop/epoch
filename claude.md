@@ -419,19 +419,21 @@ MAX_DAY_MINUTES  = 600   // 10h – Umbuchungsgrenze
 
 ### Monatliche Überstunden (StatsPage)
 
-`StatsPage` lädt zusätzlich zu `/api/stats/monthly` alle Einträge des Monats (`/api/entries`) und berechnet die Überstunden clientseitig — mit einem Umschalter **Pro Tag** / **Pro Projekt** (State `overtimeView`):
+`StatsPage` lädt zusätzlich zu `/api/stats/monthly` alle Einträge des Monats (`/api/entries`) und berechnet einen Überstunden-**Saldo** clientseitig — mit einem Umschalter **Pro Tag** / **Pro Projekt** (State `overtimeView`). Jeder Arbeitstag (= Tag mit mind. einem Eintrag) hat ein Soll von 480min; die Abweichung kann sowohl positiv (Überstunde) als auch negativ (Minusstunde, z.B. ein 7h-Tag) sein — beides fließt in den Saldo ein, Tage ohne jeden Eintrag (Wochenende, Urlaub) bleiben unberücksichtigt.
 
-**Pro Tag** — Tagessumme über alle Projekte, gleiche Schwelle wie `getOvertimeInfo`:
-- Für jeden Tag: `overtime = max(0, Tagessumme − 480min)`
-- "Gesamt" = Summe aller Tages-Überstunden, "Tage mit ÜS" = Anzahl betroffener Tage
+**Pro Tag** — Tagessumme über alle Projekte:
+- Für jeden Tag: `diff = Tagessumme − 480min` (kann negativ sein)
+- "Saldo" = Summe aller `diff` (Überstunden minus Minusstunden), "Tage mit Abweichung" = Anzahl betroffener Tage
+- Jeder Tag mit `diff > 0` zeigt weiterhin `getOvertimeInfo()`-Level (`overtime`/`rebook`, Amber/Rot); Tage mit `diff < 0` bekommen das neue Level `deficit` (neutrales Grau, Minus-Vorzeichen)
 - `>10h`-Warnbanner ("sollten umgebucht werden") nur in dieser Ansicht sichtbar — bezieht sich auf die Tagesgesamtsumme, ergibt pro Projekt keinen Sinn
 
-**Pro Projekt** — zählt **nur**, wenn ein einzelnes Projekt an einem Tag für sich genommen mehr als 8h gebucht hat (keine anteilige Verteilung der Tagesüberstunde auf mehrere Projekte):
-- Für jeden Tag und jedes Projekt: `overtime = max(0, Projektminuten_am_Tag − 480min)`
-- Pro Projekt wird die Liste der beitragenden Tage mit Datum angezeigt (wie in der Pro-Tag-Ansicht)
-- "Gesamt" und "Tage mit ÜS" oben in der Karte rechnen in dieser Ansicht mit den projektbezogenen Werten, nicht mit der Tagesansicht
+**Pro Projekt** — verteilt die Tagesabweichung (über **oder** unter 8h) anteilig nach Stundenanteil auf alle an dem Tag gebuchten Projekte, auch wenn ein Projekt für sich allein unter 8h liegt:
+- Für jeden Tag: `dayDiff = Tagessumme − 480min`; pro Projekt `diff = dayDiff × (Projektminuten_am_Tag / Tagessumme)`
+- Summe aller Projekt-`diff`-Werte ergibt exakt denselben Saldo wie die Pro-Tag-Ansicht (auch bei Minusstunden)
+- Pro Projekt wird die Liste der beitragenden Tage mit Datum, gearbeiteter Zeit und anteiligem `diff` angezeigt
+- "Saldo" und "Tage mit Abweichung" oben in der Karte rechnen in dieser Ansicht mit den projektbezogenen Werten, nicht mit der Tagesansicht
 
-Beispiel (Juli 2026): 11 Tage mit Tages-Überstunden, aber nur `Support` hatte an 2 Tagen (21.07., 23.07.) allein >8h → 90min Projekt-Überstunden, obwohl `Entwicklung` an einzelnen Tagen ebenfalls beteiligt war (aber nie allein >8h).
+Beispiel (Juli 2026): Tag mit `Support` 5h + `Meeting` 4h (= 9h, +60min) → Support bekommt +33min, Meeting +27min zugerechnet, obwohl keines der beiden Projekte für sich allein über 8h lag. Ein Tag mit nur `Support` 7h (kein weiteres Projekt) ergibt `diff = −60min` und senkt den Saldo entsprechend.
 
 ---
 
@@ -560,6 +562,8 @@ Datum      | Start | Ende  | Projekt     | Beschreibung
 ```
 **Alle 5 Spalten Pflicht.** Beschreibung darf nicht leer sein.
 Zeilen mit `>` oder `#` werden ignoriert.
+
+**Umgebrochene/unbrochene Zeilen werden automatisch wieder in Einträge zerlegt** (`_split_mail_entries()`/`_mail_paragraphs()`, s. App-Versionshistorie 0.7.5): Viele Mail-Programme brechen lange Klartext-Zeilen beim Versand automatisch um (RFC 2822, üblich bei ~72–78 Zeichen, z.B. Thunderbird über `mailnews.wraplength`) — oder schicken den Text nach einer HTML-zu-Klartext-Konvertierung ganz ohne Zeilenumbrüche als eine einzige durchgehende Zeile. Die Mail wird zuerst in Absätze gruppiert (Grenze = Leerzeile oder `>`/`#`-Zeile), jeder Absatz zu einem String normalisiert und an jeder Stelle aufgetrennt, an der ein neuer Eintrag beginnt (Datum+Pipe). Eine Grußformel nach den Einträgen (mit Leerzeile davor) bleibt dadurch ein eigener Absatz und führt weiterhin zum erwarteten Fehler statt fälschlich angehängt zu werden. Fehlermeldungen referenzieren „Eintrag N" statt einer Zeilennummer. **Bekannte Einschränkung:** eine fehlerhafte Zeile ohne Pipe-Zeichen direkt (ohne Leerzeile) nach einem gültigen Eintrag wird still an dessen Beschreibung angehängt statt einen Fehler auszulösen.
 
 Erfolgreich verarbeitete Mails (`parsed`) werden auf dem IMAP-Server per `\Deleted`-Flag + `expunge()` endgültig gelöscht statt nur als gelesen markiert. Mails mit `skipped`/`error`-Status bleiben im Postfach (als gelesen markiert) für Debugging erhalten.
 
@@ -725,8 +729,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.7.1**
-**Aktuelle Doku-Version: v4.25**
+**Aktuelle App-Version: 0.7.5**
+**Aktuelle Doku-Version: v4.29**
 
 ### App-Versionshistorie
 
@@ -744,6 +748,10 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.6.1   | Fix: Fehlschlagende Service-Worker-Registrierung (z. B. `SecurityError` bei nicht vertrauenswürdigem HTTPS-Zertifikat) wurde in `main.jsx` bisher komplett lautlos verschluckt (`.catch(() => {})`), wodurch der Push-Toggle ohne jeden erkennbaren Grund dauerhaft deaktiviert blieb. Loggt den Fehler jetzt in die Konsole (`console.error`) — kein UI-Verhalten geändert, nur Diagnose beim Debuggen erleichtert (s. „Push-Benachrichtigungen im Detail") |
 | 0.7.0   | Push-Intervall konfigurierbar: neue Singleton-Tabelle `push_settings` (`interval_seconds`, Default 240), `GET`/`PUT /api/push/settings`, `_push_loop()` liest den Wert jetzt aus der DB statt der bisherigen fest verdrahteten `PUSH_INTERVAL_SECONDS`-Konstante. UI dafür in `PushSettingsCard` (`SettingsPage.jsx`) — serverweite Einstellung, gilt für alle Geräte gemeinsam (anders als der Push-Subscribe-Toggle, der pro Gerät ist) |
 | 0.7.1   | Fix: Mail-Import legte Zeitslots mit 2h-Versatz an — die in der Mail eingetragene Uhrzeit (Europe/Berlin-Ortszeit, z.B. „09:00") wurde in `poll_imap_once()` ungeprüft als UTC gespeichert, statt wie bei manuellen Einträgen (s. 0.4.1) erst umgerechnet zu werden. Neuer Helper `_local_hhmm_to_utc()` (`backend/main.py`, nutzt `zoneinfo.ZoneInfo("Europe/Berlin")`) rechnet jetzt auch hier korrekt um, inkl. Sommer-/Winterzeit und Mitternachts-Übergang (Eintrags-`date` wird aus dem umgerechneten UTC-Start abgeleitet, nicht mehr aus dem Mail-Datum) |
+| 0.7.2   | Fix: Überstunden „Pro Projekt" (Stats-Seite) zählte bisher nur Tage, an denen ein einzelnes Projekt für sich allein mehr als 8h gebucht war — an Tagen mit mehreren Projekten unter je 8h fehlte die Tagesüberstunde komplett in der Projekt-Summe, die Gesamtsummen von „Pro Tag" und „Pro Projekt" stimmten dadurch nicht überein. `overtimeByProject` (`StatsPage.jsx`) verteilt die Tagesüberstunde jetzt anteilig nach Stundenanteil auf alle an dem Tag gebuchten Projekte, auch wenn ein Projekt allein unter 8h liegt — Summe über alle Projekte ergibt wieder exakt die Tagesüberstunde |
+| 0.7.3   | Fix: Überstunden-Karte (Stats-Seite) berücksichtigte bisher nur Tage über 8h — ein Arbeitstag unter 8h (z.B. 7h, kein weiteres Projekt) floss nirgends als Minusstunde ein, der monatliche Saldo war dadurch zu hoch. `overtimeDays`/`overtimeByProject` (`StatsPage.jsx`) bilden jetzt für jeden Arbeitstag die Differenz zu 8h (positiv = Überstunde, negativ = Minusstunde) und summieren beides zu einem echten Saldo („Gesamt"-Kachel umbenannt in „Saldo", kann jetzt negativ sein); in der Pro-Projekt-Ansicht wird auch eine Minusstunde anteilig nach Stundenanteil auf die Projekte des Tages verteilt, analog zur Überstunden-Verteilung aus 0.7.2 |
+| 0.7.4   | Fix: Mail-Import (`_parse_mail_body`, `backend/main.py`) schlug fehl, wenn das Mail-Programm eine lange Zeile beim Klartext-Versand hart umgebrochen hat (z.B. Outlook/Thunderbird ab ~72–78 Zeichen) — die entstandene Fortsetzungszeile hatte keine Pipe-Trennzeichen und riss wegen „Alles-oder-nichts" die komplette Mail. Erste Version einer Zeilen-Zusammenfügung vor der Validierung (abgelöst durch 0.7.5, s. dort) |
+| 0.7.5   | Fix/Nachbesserung zu 0.7.4: die zeilenweise Fortsetzungs-Heuristik aus 0.7.4 griff nicht, wenn eine E-Mail (z.B. nach Deaktivieren des Zeilenumbruchs im Mail-Programm oder durch HTML-zu-Klartext-Konvertierung) komplett OHNE Zeilenumbrüche als eine einzige durchgehende Zeile verschickt wurde — alle Einträge wurden dann fälschlich zu einem einzigen mit Datenmüll in der Beschreibung zusammengefasst. Ersetzt durch `_split_mail_entries()`/`_mail_paragraphs()`: gruppiert zuerst in Absätze (Grenze = Leerzeile oder `>`/`#`-Zeile, verhindert weiterhin, dass z.B. eine Grußformel fälschlich angehängt wird), normalisiert dann jeden Absatz zu einem String und trennt ihn an jeder Stelle auf, an der ein neuer Eintrag beginnt (Datum+Pipe, per Lookahead-Regex) — funktioniert unabhängig davon, ob/wo genau umgebrochen wurde. Fehlermeldungen referenzieren jetzt „Eintrag N" statt einer Zeilennummer (nach der Normalisierung nicht mehr eindeutig). Bekannte Einschränkung: eine fehlerhafte Zeile ohne Pipe-Zeichen, die direkt (ohne Leerzeile) auf einen gültigen Eintrag folgt, wird jetzt still an dessen Beschreibung angehängt statt einen Fehler auszulösen — Daten gehen dabei nicht verloren (nur unerwartet lange Beschreibung), aber die Konsistenzprüfung greift hier nicht mehr |
 
 ### Doku-Versionshistorie
 
@@ -787,3 +795,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.23   | „Pomodoro-Timer im Detail" präzisiert: Ton (Frequenz-Unterschied Arbeit/Pause) und Benachrichtigungen laufen rein clientseitig im offenen Tab, unabhängig von und zusätzlich zu den Web-Push-Benachrichtigungen (Doku, kein Code) |
 | v4.24   | Fix Zeitzonen-Offset beim Mail-Import (s. App-Versionshistorie 0.7.1), Abschnitte „Zeitdarstellung" und „Bekannte Einschränkungen" entsprechend aktualisiert |
 | v4.25   | Drei Doku-Korrekturen (Code unverändert): toten „TODO: Backup-Lösung für SQLite-Volume"-Abschnitt entfernt (referenzierte ein Docker-Volume, das seit v4.9 durch einen Bind-Mount ersetzt ist, und war laut v4.11 bereits als entfernt vermerkt); „Bekannte Einschränkungen" zu Service Worker/Offline korrigiert (Service Worker existiert seit v0.6.0, cached aber nichts); Spalte `date` in `time_entries` korrekt als UTC-Datum von `start_time` beschrieben statt als „lokales Datum" |
+| v4.26   | Fix Überstunden „Pro Projekt"-Ansicht auf der Stats-Seite (s. App-Versionshistorie 0.7.2) |
+| v4.27   | Fix Überstunden-Saldo berücksichtigt jetzt auch Minusstunden (s. App-Versionshistorie 0.7.3), Abschnitt „Monatliche Überstunden (StatsPage)" entsprechend überarbeitet |
+| v4.28   | Fix Mail-Import: hart umgebrochene Zeilen werden vor der Validierung zusammengefügt (s. App-Versionshistorie 0.7.4), Abschnitt „Eingehend (IMAP) — Pflichtformat (Body)" entsprechend ergänzt |
+| v4.29   | Nachbesserung zu v4.28: Mail-Import-Zerlegung robuster gegen komplett unbrochene Zeilen (s. App-Versionshistorie 0.7.5), Abschnitt „Eingehend (IMAP) — Pflichtformat (Body)" entsprechend aktualisiert |

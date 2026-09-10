@@ -8,6 +8,9 @@ import { fmtMinutes, getOvertimeInfo, WORK_DAY_MINUTES } from '../hooks/useTimer
 dayjs.locale('de')
 export const MONTHS = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez']
 
+// Signed variant of fmtMinutes für Salden, die auch negativ sein können (Minusstunden).
+const fmtSigned = (min) => `${min < 0 ? '−' : '+'}${fmtMinutes(Math.abs(min))}`
+
 export default function StatsPage({ year, month, setYear, setMonth }) {
   const [stats, setStats] = useState(null)
   const [entries, setEntries] = useState([])
@@ -40,15 +43,27 @@ export default function StatsPage({ year, month, setYear, setMonth }) {
     acc[e.date] = (acc[e.date] || 0) + (e.duration_minutes || 0)
     return acc
   }, {})
+  // Jeder Arbeitstag (= Tag mit mind. einem Eintrag) zählt mit einem Soll von 8h.
+  // diff > 0 → Überstunde, diff < 0 → Minusstunde (fehlt zum vollen Tag). Beides
+  // fließt in den Saldo ein, damit z.B. ein 7h-Tag die Gesamtüberstunden wieder senkt.
   const overtimeDays = Object.entries(dayTotals)
-    .map(([date, mins]) => ({ date, mins, ...getOvertimeInfo(mins) }))
+    .map(([date, mins]) => {
+      const diff = mins - WORK_DAY_MINUTES
+      if (diff > 0) return { date, mins, diff, ...getOvertimeInfo(mins) }
+      if (diff < 0) return { date, mins, diff, overtime: 0, mustRebook: 0, level: 'deficit' }
+      return { date, mins, diff: 0, overtime: 0, mustRebook: 0, level: 'none' }
+    })
     .filter(d => d.level !== 'none')
     .sort((a, b) => b.date.localeCompare(a.date))
-  const totalOvertimeMin = overtimeDays.reduce((s, d) => s + d.overtime, 0)
+  const totalOvertimeMin = overtimeDays.reduce((s, d) => s + Math.max(d.diff, 0), 0)
+  const totalDeficitMin  = overtimeDays.reduce((s, d) => s + Math.max(-d.diff, 0), 0)
+  const netOvertimeMin   = totalOvertimeMin - totalDeficitMin
   const totalRebookMin   = overtimeDays.reduce((s, d) => s + d.mustRebook, 0)
 
-  // Projektüberstunden: zählt nur, wenn ein einzelnes Projekt an einem Tag
-  // für sich genommen mehr als 8h gebucht hat (nicht anteilig an der Tagesüberstunde).
+  // Projektsaldo: die Tagesabweichung (über ODER unter 8h) wird anteilig nach dem
+  // Stundenanteil jedes Projekts an diesem Tag verteilt (auch wenn ein Projekt an
+  // dem Tag für sich genommen unter 8h liegt) — so ergibt die Summe über alle
+  // Projekte wieder exakt denselben Saldo wie die Tagesansicht.
   const overtimeByProject = (() => {
     const dayProjectMin = {}
     finishedEntries.forEach(e => {
@@ -58,13 +73,14 @@ export default function StatsPage({ year, month, setYear, setMonth }) {
     })
     const acc = {}
     Object.entries(dayProjectMin).forEach(([date, projMins]) => {
+      const dayTotal = Object.values(projMins).reduce((s, m) => s + m, 0)
+      const dayDiff = dayTotal - WORK_DAY_MINUTES
+      if (dayDiff === 0) return
       Object.entries(projMins).forEach(([p, mins]) => {
-        if (mins > WORK_DAY_MINUTES) {
-          const overtime = mins - WORK_DAY_MINUTES
-          if (!acc[p]) acc[p] = { mins: 0, days: [] }
-          acc[p].mins += overtime
-          acc[p].days.push({ date, overtime })
-        }
+        const diff = dayDiff * (mins / dayTotal)
+        if (!acc[p]) acc[p] = { mins: 0, days: [] }
+        acc[p].mins += diff
+        acc[p].days.push({ date, diff, mins })
       })
     })
     return Object.entries(acc)
@@ -200,12 +216,17 @@ export default function StatsPage({ year, month, setYear, setMonth }) {
                 </div>
               </div>
               <div className="grid2" style={{ gap: 9, marginBottom: 14 }}>
-                <div style={{ background: 'var(--bg3)', border: '1px solid rgba(255,170,0,.2)', borderRadius: 'var(--r)', padding: 13 }}>
-                  <div className="label" style={{ marginBottom: 5 }}>Gesamt</div>
-                  <div className="mono" style={{ fontSize: 22, color: 'var(--amber)', letterSpacing: '-.02em' }}>+{fmtMinutes(overtimeView === 'project' ? totalProjectOvertimeMin : totalOvertimeMin)}</div>
-                </div>
+                {(() => {
+                  const net = overtimeView === 'project' ? totalProjectOvertimeMin : netOvertimeMin
+                  return (
+                    <div style={{ background: 'var(--bg3)', border: `1px solid ${net < 0 ? 'var(--border2)' : 'rgba(255,170,0,.2)'}`, borderRadius: 'var(--r)', padding: 13 }}>
+                      <div className="label" style={{ marginBottom: 5 }}>Saldo</div>
+                      <div className="mono" style={{ fontSize: 22, color: net < 0 ? 'var(--text2)' : 'var(--amber)', letterSpacing: '-.02em' }}>{fmtSigned(net)}</div>
+                    </div>
+                  )
+                })()}
                 <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 13 }}>
-                  <div className="label" style={{ marginBottom: 5 }}>Tage mit ÜS</div>
+                  <div className="label" style={{ marginBottom: 5 }}>Tage mit Abweichung</div>
                   <div className="mono" style={{ fontSize: 22, color: 'var(--text)', letterSpacing: '-.02em' }}>{overtimeView === 'project' ? projectOvertimeDayCount : overtimeDays.length}</div>
                 </div>
               </div>
@@ -230,29 +251,32 @@ export default function StatsPage({ year, month, setYear, setMonth }) {
                         <span className="mono" style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtMinutes(d.mins)} gesamt</span>
                         <span style={{
                           fontFamily: 'var(--mono)', fontSize: 10, padding: '2px 6px', borderRadius: 'var(--r)',
-                          background: d.level === 'rebook' ? 'var(--red-dim)' : 'var(--amber-dim)',
-                          color: d.level === 'rebook' ? 'var(--red)' : 'var(--amber)',
-                        }}>+{fmtMinutes(d.overtime)}</span>
+                          background: d.level === 'rebook' ? 'var(--red-dim)' : d.level === 'deficit' ? 'var(--bg4)' : 'var(--amber-dim)',
+                          color: d.level === 'rebook' ? 'var(--red)' : d.level === 'deficit' ? 'var(--text2)' : 'var(--amber)',
+                        }}>{fmtSigned(d.diff)}</span>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div className="label" style={{ marginBottom: -6, color: 'var(--text3)' }}>Zählt nur Tage, an denen das Projekt allein mehr als 8h gebucht wurde</div>
+                  <div className="label" style={{ marginBottom: -6, color: 'var(--text3)' }}>Tagesabweichung (über oder unter 8h) wird anteilig nach Stundenanteil auf die Projekte des Tages verteilt</div>
                   {overtimeByProject.length === 0 ? (
-                    <div style={{ fontSize: 12, color: 'var(--text3)', padding: '8px 0' }}>Kein Projekt hat an einem Tag allein mehr als 8h erreicht.</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)', padding: '8px 0' }}>Keine Abweichung von der Regelarbeitszeit in diesem Monat.</div>
                   ) : overtimeByProject.map(p => (
                     <div key={p.name}>
                       <div className="flex items-center gap-2">
                         <div style={{ flex: 1, fontSize: 12 }}>{p.name}</div>
-                        <div className="mono" style={{ fontSize: 11, color: 'var(--amber)' }}>+{fmtMinutes(p.mins)}</div>
+                        <div className="mono" style={{ fontSize: 11, color: p.mins < 0 ? 'var(--text2)' : 'var(--amber)' }}>{fmtSigned(p.mins)}</div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6, paddingLeft: 8, borderLeft: '1px solid var(--border)' }}>
                         {p.days.map(d => (
                           <div key={d.date} className="flex items-center justify-between" style={{ fontSize: 11 }}>
                             <div className="mono" style={{ color: 'var(--text3)' }}>{dayjs(d.date).format('ddd, D. MMM')}</div>
-                            <span className="mono" style={{ fontSize: 10, color: 'var(--text3)' }}>+{fmtMinutes(d.overtime)}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="mono" style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtMinutes(d.mins)} gearbeitet</span>
+                              <span className="mono" style={{ fontSize: 10, color: d.diff < 0 ? 'var(--text2)' : 'var(--text3)' }}>{fmtSigned(d.diff)}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
