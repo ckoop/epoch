@@ -1026,16 +1026,16 @@ PIPE_COUNT_RE  = re.compile(r'\|')
 
 
 class MailParseError(Exception):
-    """Raised when a mail line is invalid. Contains a human-readable explanation."""
-    def __init__(self, lineno: int, line: str, reason: str):
-        self.lineno = lineno
-        self.line   = line
-        self.reason = reason
-        super().__init__(f"Zeile {lineno}: {reason}")
+    """Raised when a mail entry is invalid. Contains a human-readable explanation."""
+    def __init__(self, entry_no: int, line: str, reason: str):
+        self.entry_no = entry_no
+        self.line     = line
+        self.reason   = reason
+        super().__init__(f"Eintrag {entry_no}: {reason}")
 
     def user_message(self) -> str:
         return (
-            f"Zeile {self.lineno}: {self.reason}\n"
+            f"Eintrag {self.entry_no}: {self.reason}\n"
             f"  Inhalt: {self.line}\n"
             f"  Erwartet: YYYY-MM-DD | HH:MM | HH:MM | Projekt | Beschreibung"
         )
@@ -1069,32 +1069,91 @@ def _diagnose_line(line: str) -> str:
     return "Ungültiges Format"
 
 
+# Zero-width Lookahead: markiert die Stelle, an der ein neuer Eintrag beginnt
+# (Datum + Pipe), ohne diese Zeichen selbst zu verbrauchen — dient als
+# Split-Punkt, egal ob davor ein echter Zeilenumbruch stand oder nicht.
+ENTRY_SPLIT_RE = re.compile(r'(?=\d{4}-\d{2}-\d{2}\s*\|)')
+WS_RE = re.compile(r'\s+')
+
+
+def _mail_paragraphs(text: str):
+    """Gruppiert die Mail in Bloecke aufeinanderfolgender, nicht-leerer Zeilen.
+    Eine Leerzeile oder eine '>'/'#'-Zeile (Zitat/Kommentar) beendet den
+    aktuellen Block — das ist die Grenze, an der z.B. eine Gruszformel nach
+    den Eintraegen NICHT mehr mit angehaengt wird, sondern als eigener,
+    validierter (und bei Nichtuebereinstimmung fehlschlagender) Block zaehlt.
+    """
+    current = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(">") or line.startswith("#"):
+            if current:
+                yield current
+                current = []
+            continue
+        current.append(line)
+    if current:
+        yield current
+
+
+def _split_mail_entries(text: str) -> list:
+    """Zerlegt den Mail-Text in einzelne Eintraege — robust unabhaengig davon,
+    WIE das Mail-Programm lange Zeilen innerhalb eines Absatzes behandelt hat:
+    - hart umgebrochen (RFC 2822, ueblich bei ~72-78 Zeichen), oder
+    - z.B. nach einer HTML-zu-Klartext-Konvertierung ganz OHNE Zeilenumbrueche
+      als eine einzige durchgehende Zeile verschickt.
+
+    Jeder Absatz (s. _mail_paragraphs, durch Leerzeile/'>'/'#' begrenzt) wird
+    zu einem String normalisiert (beliebige Folgen von Leerzeichen/
+    Zeilenumbruechen -> ein Leerzeichen) und an jeder Stelle aufgetrennt, an
+    der ein neuer Eintrag beginnt (Datum + Pipe). Das rekonstruiert die
+    urspruengliche Zeile unabhaengig von der Umbruch-Stelle UND findet auch
+    Eintraege, die mitten in einer einzigen langen Zeile aneinanderhaengen —
+    OHNE dabei einen nachfolgenden Absatz (z.B. eine Gruszformel) faelschlich
+    mit anzuhaengen (die Absatzgrenze bleibt erhalten).
+
+    Gibt eine Liste von (Eintrag-Nr., Text) zurueck, 1-basiert in der
+    Reihenfolge der Mail — fuer Fehlermeldungen ("Eintrag N" statt einer
+    physischen Zeilennummer, die nach der Normalisierung ohnehin nicht mehr
+    eindeutig waere).
+    """
+    entries = []
+    for para_lines in _mail_paragraphs(text):
+        flattened = WS_RE.sub(" ", " ".join(para_lines)).strip()
+        if not flattened:
+            continue
+        for chunk in ENTRY_SPLIT_RE.split(flattened):
+            chunk = chunk.strip()
+            if chunk:
+                entries.append(chunk)
+    return list(enumerate(entries, start=1))
+
+
 def _parse_mail_body(text: str, fallback_date: date) -> list:
     """Parse pipe-separated lines: Datum | Start | Ende | Projekt | Beschreibung
 
-    All 5 columns are mandatory. Raises MailParseError on the first invalid line.
-    Lines starting with > or # are ignored (quoted replies, comments).
+    All 5 columns are mandatory. Raises MailParseError on the first invalid
+    entry. Lines starting with > or # are ignored (quoted replies, comments).
+    Vom Mail-Programm umgebrochene bzw. komplett unbrochene Zeilen werden
+    vorher wieder in einzelne Eintraege zerlegt (s. _split_mail_entries).
     """
     results = []
-    for lineno, raw in enumerate(text.splitlines(), start=1):
-        line = raw.strip()
-        if not line or line.startswith(">") or line.startswith("#"):
-            continue
+    for entry_no, line in _split_mail_entries(text):
         m = PIPE_RE_FULL.match(line)
         if not m:
             reason = _diagnose_line(line)
-            raise MailParseError(lineno, line, reason)
+            raise MailParseError(entry_no, line, reason)
         raw_date, start_s, end_s, project, description = m.groups()
         try:
             entry_date = date.fromisoformat(raw_date.strip())
         except ValueError:
-            raise MailParseError(lineno, line, f"Ungültiges Datum: '{raw_date.strip()}'")
+            raise MailParseError(entry_no, line, f"Ungültiges Datum: '{raw_date.strip()}'")
 
         # Validate time values (regex allows 25:00 etc., catch here)
         for col, label, val in [(2, "Start", start_s.strip()), (3, "Ende", end_s.strip())]:
             h, m = val.split(":")
             if not (0 <= int(h) <= 23 and 0 <= int(m) <= 59):
-                raise MailParseError(lineno, line,
+                raise MailParseError(entry_no, line,
                     f"Spalte {col} ({label}) ungültige Uhrzeit: '{val}' — erwartet HH:MM (00:00–23:59)")
 
         results.append({
