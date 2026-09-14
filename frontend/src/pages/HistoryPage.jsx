@@ -145,7 +145,7 @@ function HistoryRow({ entry, onDelete, onEdit }) {
       </div>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
         <span className="tag tag-g">{entry.project}</span>
-        {entry.source === 1 && <span className="tag tag-m" style={{ width: 46, justifyContent: 'center', flexShrink: 0 }}>manuell</span>}{entry.source === 2 && <span className="tag" style={{ background: "rgba(255,170,0,.12)", color: "#ffaa00", width: 46, justifyContent: 'center', flexShrink: 0 }}>E-Mail</span>}
+        {entry.source === 1 && <span className="tag tag-m" style={{ width: 46, justifyContent: 'center', flexShrink: 0, whiteSpace: 'nowrap' }}>manuell</span>}{entry.source === 2 && <span className="tag" style={{ background: "rgba(255,170,0,.12)", color: "#ffaa00", width: 46, justifyContent: 'center', flexShrink: 0, whiteSpace: 'nowrap' }}>E-Mail</span>}
         {entry.description && <span style={{ fontSize: 11, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.description}</span>}
       </div>
       <div className="mono" style={{ fontSize: 12, flexShrink: 0 }}>{fmtMinutes(entry.duration_minutes)}</div>
