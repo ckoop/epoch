@@ -158,6 +158,50 @@ expect_status "Beschreibungs-Vorschlaege abrufen" 200
 echo "$BODY_OUT" | jq -e 'index("Testeintrag geaendert") != null' >/dev/null 2>&1
 check "Geaenderte Beschreibung taucht in Vorschlaegen auf" "$?"
 
+# ── 3b. Reihenfolge & automatische Zeitverschiebung ─────────────────────────
+
+echo "== Reihenfolge & Zeitverschiebung =="
+
+# ENTRY_ID laeuft 09:00-10:30 (s.o.) — zwei direkt anschliessende Eintraege anlegen.
+curl_json POST /entries/manual "{\"date\":\"$TODAY\",\"start_time\":\"10:30\",\"end_time\":\"11:00\",\"project\":\"$TEST_PROJECT\",\"description\":\"Folgeeintrag 1\"}"
+expect_status "Folgeeintrag 1 anlegen" 200
+FOLLOWUP1_ID=$(echo "$BODY_OUT" | jq -r '.id')
+
+curl_json POST /entries/manual "{\"date\":\"$TODAY\",\"start_time\":\"11:00\",\"end_time\":\"11:30\",\"project\":\"$TEST_PROJECT\",\"description\":\"Folgeeintrag 2\"}"
+expect_status "Folgeeintrag 2 anlegen" 200
+FOLLOWUP2_ID=$(echo "$BODY_OUT" | jq -r '.id')
+
+curl_json GET "/entries?from_date=$TODAY&to_date=$TODAY"
+expect_status "Eintraege des Tages abrufen (fuer Reihenfolge-Check)" 200
+# Nur die drei chronologisch zusammenhaengenden Testeintraege herausfiltern (der
+# Timer-Test oben kann je nach Laufzeit einen weiteren, noch frueheren Eintrag
+# auf demselben Testprojekt angelegt haben — fuer die Reihenfolge irrelevant).
+ACTUAL_ORDER=$(echo "$BODY_OUT" | jq -c "[.[] | select(.id == $ENTRY_ID or .id == $FOLLOWUP1_ID or .id == $FOLLOWUP2_ID) | .id]" 2>/dev/null)
+[ "$ACTUAL_ORDER" = "[$ENTRY_ID,$FOLLOWUP1_ID,$FOLLOWUP2_ID]" ]
+check "Eintraege stehen chronologisch aufsteigend (alt vor neu)" "$?"
+
+# Endzeit von ENTRY_ID um 30 Min nach hinten verschieben — beide Folgeeintraege
+# muessen automatisch mitwandern, ohne dass sie selbst angefasst wurden.
+curl_json PUT "/entries/$ENTRY_ID" '{"start_time":"09:00","end_time":"11:00"}'
+expect_status "Endzeit des ersten Eintrags um 30 Min verschieben" 200
+
+curl_json GET "/entries?from_date=$TODAY&to_date=$TODAY"
+expect_jq "Folgeeintrag 1 um 30 Min mitgewandert (Start 11:00)" \
+  ".[] | select(.id == $FOLLOWUP1_ID) | .start_time | split(\"T\")[1]" "11:00:00"
+expect_jq "Folgeeintrag 1 um 30 Min mitgewandert (Ende 11:30)" \
+  ".[] | select(.id == $FOLLOWUP1_ID) | .end_time | split(\"T\")[1]" "11:30:00"
+expect_jq "Folgeeintrag 2 um 30 Min mitgewandert (Start 11:30)" \
+  ".[] | select(.id == $FOLLOWUP2_ID) | .start_time | split(\"T\")[1]" "11:30:00"
+expect_jq "Folgeeintrag 2 um 30 Min mitgewandert (Ende 12:00)" \
+  ".[] | select(.id == $FOLLOWUP2_ID) | .end_time | split(\"T\")[1]" "12:00:00"
+
+# Reine Beschreibungsaenderung darf keine Verschiebung ausloesen.
+curl_json PUT "/entries/$FOLLOWUP1_ID" '{"description":"Folgeeintrag 1 geaendert"}'
+expect_status "Nur Beschreibung aendern (ohne Zeitangabe)" 200
+curl_json GET "/entries?from_date=$TODAY&to_date=$TODAY"
+expect_jq "Folgeeintrag 2 bleibt bei reiner Beschreibungsaenderung unveraendert (Start 11:30)" \
+  ".[] | select(.id == $FOLLOWUP2_ID) | .start_time | split(\"T\")[1]" "11:30:00"
+
 # ── 4. Tag / Woche / Notiz ───────────────────────────────────────────────────
 
 echo "== Tag / Woche / Notiz =="

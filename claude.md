@@ -231,9 +231,9 @@ timetracker/
 | Method | Path                 | Beschreibung                           |
 |--------|----------------------|----------------------------------------|
 | POST   | /api/entries/manual  | Body: `{ date, start_time, end_time, project, description }` |
-| PUT    | /api/entries/{id}    | Eintrag bearbeiten                     |
+| PUT    | /api/entries/{id}    | Eintrag bearbeiten. Ändert sich dabei die Endzeit, werden alle späteren Einträge desselben Tages (`start_time >= alte Endzeit`) automatisch um dieselbe Differenz mitverschoben (Start **und** Ende, Dauer bleibt gleich) — s. „Verlauf- und Stats-Filter" für die Sortierreihenfolge, in der sich das auswirkt |
 | DELETE | /api/entries/{id}    | Eintrag löschen                        |
-| GET    | /api/entries         | Query: `from_date`, `to_date`          |
+| GET    | /api/entries         | Query: `from_date`, `to_date`. Sortierung: Tage absteigend (neuester zuerst), Einträge innerhalb eines Tages aufsteigend (ältester zuerst) |
 | GET    | /api/entries/descriptions | Query: `project?`, `limit` (Default 15). Distinkte `description`-Werte, sortiert nach Häufigkeit dann Aktualität (letztes Datum) — Datengrundlage für Autocomplete-Vorschläge |
 
 ### Tag / Woche
@@ -361,6 +361,10 @@ Alle Variablen optional — fehlen Credentials, ist Mail bzw. Push deaktiviert. 
 - Die drei oberen Kacheln **Gesamtstunden / Arbeitstage / Ø pro Tag** rechnen bei aktiver Auswahl auf das gefilterte Projekt um (Werte aus den geladenen `entries`, nicht aus `stats`)
 - Filter-Chip mit ✕-Button oberhalb der Kacheln; wird beim Monatswechsel automatisch zurückgesetzt
 - Unabhängig davon: die "Überstunden"-Karte hat einen eigenen Pro-Tag/Pro-Projekt-Umschalter (siehe unten) — beide Filter sind separate State-Variablen
+
+**Sortierung** — `GET /api/entries` (Datenquelle der HistoryPage) sortiert Tage absteigend (neuester zuerst), Einträge innerhalb eines Tages aber aufsteigend (ältester zuerst, erster Eintrag des Tages steht oben) — analog zu `/api/day` und `/api/week` (WeekPage, TimerPage), die schon vorher chronologisch aufsteigend sortiert waren.
+
+**Automatische Zeitverschiebung beim Bearbeiten** — wird beim Bearbeiten eines Eintrags (`EditEntryModal`) die Endzeit verändert, verschiebt `PUT /api/entries/{id}` (`backend/main.py`) alle späteren Einträge desselben Tages (`start_time >= alte Endzeit` vor der Änderung) automatisch um dieselbe Zeitdifferenz — Start und Ende gemeinsam, die jeweilige Dauer bleibt unverändert. So muss nach einer nachträglichen Zeitkorrektur (z.B. ein Meeting dauerte länger) nicht jeder Folgeeintrag manuell nachgezogen werden. Wird nur der Projektname/die Beschreibung geändert oder bleibt die Endzeit gleich, findet keine Verschiebung statt. Einträge *vor* dem bearbeiteten Eintrag sowie Einträge an anderen Tagen bleiben immer unangetastet.
 
 **HistoryPage Projekt-Filter ist nach `App.jsx` hochgezogen** (`historyProject`/`setHistoryProject`, per Props an `HistoryPage` durchgereicht) — nicht mehr lokaler State der Seite. Grund: die Sidebar (siehe unten) muss den aktuell gewählten Wert kennen. `taskFilter` (Aufgaben-Suche) bleibt dagegen lokaler State in `HistoryPage`, da er nirgendwo sonst gebraucht wird.
 
@@ -728,8 +732,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.7.8**
-**Aktuelle Doku-Version: v4.32**
+**Aktuelle App-Version: 0.8.0**
+**Aktuelle Doku-Version: v4.33**
 
 ### App-Versionshistorie
 
@@ -754,6 +758,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.7.6   | Teilweiser Rückbau von 0.7.2/0.7.3: die anteilige Verteilung der Tagesabweichung auf mehrere Projekte (`overtimeByProject`, s. 0.7.2) wurde auf Wunsch wieder auf den Stand vor 0.7.2 zurückgesetzt — „Pro Projekt" zählt wieder nur Tage, an denen ein einzelnes Projekt für sich allein mehr als 8h gebucht hat, keine Minusstunden. Die Tagesansicht und der Saldo (inkl. Minusstunden, s. 0.7.3) bleiben unverändert — Summe „Pro Projekt" muss (bewusst) nicht mehr mit dem Saldo aus „Pro Tag" übereinstimmen |
 | 0.7.7   | Fix: Source-Badge („manuell"/„E-Mail") in Verlauf und Woche hatte je nach Text unterschiedliche Breite, wodurch die danebenstehende Beschreibung je nach Eintragsquelle horizontal verschoben war. Badge hat jetzt eine feste Breite (zentriert) in `HistoryRow` (`HistoryPage.jsx`) und der Wochenansicht (`WeekPage.jsx`) |
 | 0.7.8   | Nachbesserung zu 0.7.7: die feste Badge-Breite ließ „E-Mail" ohne `white-space: nowrap` zweizeilig umbrechen (`manuell` passte zufällig auf eine Zeile). Beide Badges (`HistoryPage.jsx`, `WeekPage.jsx`) haben jetzt zusätzlich `whiteSpace: 'nowrap'` |
+| 0.8.0   | Verlauf: `GET /api/entries` sortiert Einträge innerhalb eines Tages jetzt aufsteigend (ältester zuerst) statt absteigend, konsistent mit `/api/day`/`/api/week`. Neu: `PUT /api/entries/{id}` verschiebt beim Ändern der Endzeit automatisch alle späteren Einträge desselben Tages um dieselbe Differenz mit (Start+Ende, Dauer bleibt gleich) — s. „Verlauf- und Stats-Filter". Smoke-Tests (`backend/tests/test_api.sh`) um beide Verhaltensweisen ergänzt |
 
 ### Doku-Versionshistorie
 
@@ -804,3 +809,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.30   | Teilweiser Rückbau v4.26: „Pro Projekt" verteilt Überstunden nicht mehr anteilig auf mehrere Projekte (s. App-Versionshistorie 0.7.6), Abschnitt „Monatliche Überstunden (StatsPage)" entsprechend zurückgebaut — Tagesansicht/Saldo (v4.27) bleibt unverändert |
 | v4.31   | Fix feste Breite für Source-Badge in Verlauf/Woche (s. App-Versionshistorie 0.7.7) |
 | v4.32   | Nachbesserung zu v4.31: `white-space: nowrap` gegen Umbruch im „E-Mail"-Badge ergänzt (s. App-Versionshistorie 0.7.8) |
+| v4.33   | Abschnitt „Verlauf- und Stats-Filter" um Sortierreihenfolge und automatische Zeitverschiebung beim Bearbeiten ergänzt, Endpoint-Tabelle „Einträge" entsprechend präzisiert (s. App-Versionshistorie 0.8.0) |

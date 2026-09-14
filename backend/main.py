@@ -627,10 +627,25 @@ def update_entry(entry_id: int, body: TimeEntryUpdate, db: Session = Depends(get
     if body.project is not None: e.project = body.project
     if body.description is not None: e.description = body.description
     if body.start_time or body.end_time:
+        old_end = e.end_time
         ns = _parse_hhmm(e.date, body.start_time) if body.start_time else e.start_time
         ne = _parse_hhmm(e.date, body.end_time)   if body.end_time   else e.end_time
         if ne: e.duration_minutes = _calc_duration(ns, ne); e.end_time = ne
         e.start_time = ns
+        # Verschiebt sich die Endzeit, ruecken alle spaeteren Eintraege desselben
+        # Tages um dieselbe Differenz mit — sonst muesste jeder Folgeeintrag nach
+        # einer Zeitkorrektur einzeln nachgezogen werden.
+        if ne and old_end and ne != old_end:
+            delta = ne - old_end
+            later = db.query(TimeEntry).filter(
+                TimeEntry.date == e.date,
+                TimeEntry.id != e.id,
+                TimeEntry.start_time >= old_end,
+            ).all()
+            for other in later:
+                other.start_time = other.start_time + delta
+                if other.end_time:
+                    other.end_time = other.end_time + delta
     db.commit(); db.refresh(e)
     return e
 
@@ -646,7 +661,7 @@ def get_entries(from_date: Optional[date]=None, to_date: Optional[date]=None, db
     q = db.query(TimeEntry)
     if from_date: q = q.filter(TimeEntry.date >= from_date)
     if to_date:   q = q.filter(TimeEntry.date <= to_date)
-    return q.order_by(TimeEntry.date.desc(), TimeEntry.start_time.desc()).all()
+    return q.order_by(TimeEntry.date.desc(), TimeEntry.start_time.asc()).all()
 
 @app.get("/api/entries/descriptions", response_model=List[str])
 def get_description_suggestions(project: Optional[str] = None, limit: int = 15, db: Session = Depends(get_db)):
