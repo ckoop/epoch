@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 import 'dayjs/locale/de'
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { api } from '../api'
-import { fmtMinutes, getOvertimeInfo, WORK_DAY_MINUTES } from '../hooks/useTimer'
+import { fmtMinutes, getOvertimeInfo, WORK_DAY_MINUTES, MAX_DAY_MINUTES } from '../hooks/useTimer'
 
 dayjs.locale('de')
 export const MONTHS = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez']
@@ -43,17 +43,21 @@ export default function StatsPage({ year, month, setYear, setMonth }) {
     acc[e.date] = (acc[e.date] || 0) + (e.duration_minutes || 0)
     return acc
   }, {})
-  // Das 8h-Soll gilt nur an Wochentagen (Mo-Fr) — Samstage werden komplett
-  // aus dem Soll/Ist-Vergleich ausgenommen (keine Minus-, aber auch keine
-  // Überstunde), Sonntage duerfen ueberhaupt nicht gearbeitet werden und
-  // bekommen dafuer ein eigenes, vom Saldo ausgenommenes Warn-Level.
+  // Das 8h-Soll gilt nur an Wochentagen (Mo-Fr). Samstage zaehlen komplett
+  // als Ueberstunde (kein Soll, keine Minusstunde — jede gebuchte Minute
+  // fliesst voll in den Saldo ein), Sonntage duerfen ueberhaupt nicht
+  // gearbeitet werden und bekommen dafuer ein eigenes, vom Saldo
+  // ausgenommenes Warn-Level.
   // diff > 0 → Überstunde, diff < 0 → Minusstunde (fehlt zum vollen Tag). Beides
   // fließt in den Saldo ein, damit z.B. ein 7h-Tag die Gesamtüberstunden wieder senkt.
   const overtimeDays = Object.entries(dayTotals)
     .map(([date, mins]) => {
       const dow = dayjs(date).day() // 0 = So, 6 = Sa
       if (dow === 0) return { date, mins, diff: 0, overtime: 0, mustRebook: 0, level: 'sunday' }
-      if (dow === 6) return { date, mins, diff: 0, overtime: 0, mustRebook: 0, level: 'none' }
+      if (dow === 6) {
+        const mustRebook = Math.max(0, mins - MAX_DAY_MINUTES)
+        return { date, mins, diff: mins, overtime: mins, mustRebook, level: mustRebook > 0 ? 'rebook' : 'overtime' }
+      }
       const diff = mins - WORK_DAY_MINUTES
       if (diff > 0) return { date, mins, diff, ...getOvertimeInfo(mins) }
       if (diff < 0) return { date, mins, diff, overtime: 0, mustRebook: 0, level: 'deficit' }
