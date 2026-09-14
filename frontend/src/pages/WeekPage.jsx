@@ -147,7 +147,7 @@ function DayCard({ day, today, onAddManual, onRefresh }) {
             <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span className="mono" style={{ fontSize: 10, color: 'var(--text3)', flexShrink: 0 }}>{fmtTime(e.start_time)}–{fmtTime(e.end_time)}</span>
               <span className="tag tag-g">{e.project}</span>
-              {e.source === 1 && <span className="tag tag-m">manuell</span>}{e.source === 2 && <span className="tag" style={{background:"rgba(255,170,0,.12)",color:"#ffaa00"}}>E-Mail</span>}
+              {e.source === 1 && <span className="tag tag-m" style={{ width: 46, justifyContent: 'center', flexShrink: 0 }}>manuell</span>}{e.source === 2 && <span className="tag" style={{ background: "rgba(255,170,0,.12)", color: "#ffaa00", width: 46, justifyContent: 'center', flexShrink: 0 }}>E-Mail</span>}
               {e.description && <span style={{ fontSize: 10, color: 'var(--text2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.description}</span>}
               <span className="mono" style={{ fontSize: 10, flexShrink: 0 }}>{fmtMinutes(e.duration_minutes)}</span>
               <button className="btn-icon" onClick={() => setShowEdit(e)} title="Bearbeiten">

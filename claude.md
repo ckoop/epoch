@@ -728,8 +728,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.7.6**
-**Aktuelle Doku-Version: v4.30**
+**Aktuelle App-Version: 0.7.7**
+**Aktuelle Doku-Version: v4.31**
 
 ### App-Versionshistorie
 
@@ -752,6 +752,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.7.4   | Fix: Mail-Import (`_parse_mail_body`, `backend/main.py`) schlug fehl, wenn das Mail-Programm eine lange Zeile beim Klartext-Versand hart umgebrochen hat (z.B. Outlook/Thunderbird ab ~72–78 Zeichen) — die entstandene Fortsetzungszeile hatte keine Pipe-Trennzeichen und riss wegen „Alles-oder-nichts" die komplette Mail. Erste Version einer Zeilen-Zusammenfügung vor der Validierung (abgelöst durch 0.7.5, s. dort) |
 | 0.7.5   | Fix/Nachbesserung zu 0.7.4: die zeilenweise Fortsetzungs-Heuristik aus 0.7.4 griff nicht, wenn eine E-Mail (z.B. nach Deaktivieren des Zeilenumbruchs im Mail-Programm oder durch HTML-zu-Klartext-Konvertierung) komplett OHNE Zeilenumbrüche als eine einzige durchgehende Zeile verschickt wurde — alle Einträge wurden dann fälschlich zu einem einzigen mit Datenmüll in der Beschreibung zusammengefasst. Ersetzt durch `_split_mail_entries()`/`_mail_paragraphs()`: gruppiert zuerst in Absätze (Grenze = Leerzeile oder `>`/`#`-Zeile, verhindert weiterhin, dass z.B. eine Grußformel fälschlich angehängt wird), normalisiert dann jeden Absatz zu einem String und trennt ihn an jeder Stelle auf, an der ein neuer Eintrag beginnt (Datum+Pipe, per Lookahead-Regex) — funktioniert unabhängig davon, ob/wo genau umgebrochen wurde. Fehlermeldungen referenzieren jetzt „Eintrag N" statt einer Zeilennummer (nach der Normalisierung nicht mehr eindeutig). Bekannte Einschränkung: eine fehlerhafte Zeile ohne Pipe-Zeichen, die direkt (ohne Leerzeile) auf einen gültigen Eintrag folgt, wird jetzt still an dessen Beschreibung angehängt statt einen Fehler auszulösen — Daten gehen dabei nicht verloren (nur unerwartet lange Beschreibung), aber die Konsistenzprüfung greift hier nicht mehr |
 | 0.7.6   | Teilweiser Rückbau von 0.7.2/0.7.3: die anteilige Verteilung der Tagesabweichung auf mehrere Projekte (`overtimeByProject`, s. 0.7.2) wurde auf Wunsch wieder auf den Stand vor 0.7.2 zurückgesetzt — „Pro Projekt" zählt wieder nur Tage, an denen ein einzelnes Projekt für sich allein mehr als 8h gebucht hat, keine Minusstunden. Die Tagesansicht und der Saldo (inkl. Minusstunden, s. 0.7.3) bleiben unverändert — Summe „Pro Projekt" muss (bewusst) nicht mehr mit dem Saldo aus „Pro Tag" übereinstimmen |
+| 0.7.7   | Fix: Source-Badge („manuell"/„E-Mail") in Verlauf und Woche hatte je nach Text unterschiedliche Breite, wodurch die danebenstehende Beschreibung je nach Eintragsquelle horizontal verschoben war. Badge hat jetzt eine feste Breite (zentriert) in `HistoryRow` (`HistoryPage.jsx`) und der Wochenansicht (`WeekPage.jsx`) |
 
 ### Doku-Versionshistorie
 
@@ -800,3 +801,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.28   | Fix Mail-Import: hart umgebrochene Zeilen werden vor der Validierung zusammengefügt (s. App-Versionshistorie 0.7.4), Abschnitt „Eingehend (IMAP) — Pflichtformat (Body)" entsprechend ergänzt |
 | v4.29   | Nachbesserung zu v4.28: Mail-Import-Zerlegung robuster gegen komplett unbrochene Zeilen (s. App-Versionshistorie 0.7.5), Abschnitt „Eingehend (IMAP) — Pflichtformat (Body)" entsprechend aktualisiert |
 | v4.30   | Teilweiser Rückbau v4.26: „Pro Projekt" verteilt Überstunden nicht mehr anteilig auf mehrere Projekte (s. App-Versionshistorie 0.7.6), Abschnitt „Monatliche Überstunden (StatsPage)" entsprechend zurückgebaut — Tagesansicht/Saldo (v4.27) bleibt unverändert |
+| v4.31   | Fix feste Breite für Source-Badge in Verlauf/Woche (s. App-Versionshistorie 0.7.7) |
