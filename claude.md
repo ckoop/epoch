@@ -423,13 +423,18 @@ MAX_DAY_MINUTES  = 600   // 10h – Umbuchungsgrenze
 
 ### Monatliche Überstunden (StatsPage)
 
-`StatsPage` lädt zusätzlich zu `/api/stats/monthly` alle Einträge des Monats (`/api/entries`) und berechnet einen Überstunden-**Saldo** clientseitig — mit einem Umschalter **Pro Tag** / **Pro Projekt** (State `overtimeView`). Jeder Arbeitstag (= Tag mit mind. einem Eintrag) hat ein Soll von 480min; die Abweichung kann sowohl positiv (Überstunde) als auch negativ (Minusstunde, z.B. ein 7h-Tag) sein — beides fließt in den Saldo ein, Tage ohne jeden Eintrag (Wochenende, Urlaub) bleiben unberücksichtigt.
+`StatsPage` lädt zusätzlich zu `/api/stats/monthly` alle Einträge des Monats (`/api/entries`) und berechnet einen Überstunden-**Saldo** clientseitig — mit einem Umschalter **Pro Tag** / **Pro Projekt** (State `overtimeView`). Jeder Arbeitstag (= Tag mit mind. einem Eintrag) hat ein Soll von 480min; die Abweichung kann sowohl positiv (Überstunde) als auch negativ (Minusstunde, z.B. ein 7h-Tag) sein — beides fließt in den Saldo ein, Tage ohne jeden Eintrag (Wochenende, Urlaub) bleiben unberücksichtigt. Das Soll gilt nur an Wochentagen (Mo-Fr) — s. „Wochenend-Sonderfälle" unten.
 
 **Pro Tag** — Tagessumme über alle Projekte:
 - Für jeden Tag: `diff = Tagessumme − 480min` (kann negativ sein)
 - "Saldo" = Summe aller `diff` (Überstunden minus Minusstunden), "Tage mit Abweichung" = Anzahl betroffener Tage
 - Jeder Tag mit `diff > 0` zeigt weiterhin `getOvertimeInfo()`-Level (`overtime`/`rebook`, Amber/Rot); Tage mit `diff < 0` bekommen das neue Level `deficit` (neutrales Grau, Minus-Vorzeichen)
 - `>10h`-Warnbanner ("sollten umgebucht werden") nur in dieser Ansicht sichtbar — bezieht sich auf die Tagesgesamtsumme, ergibt pro Projekt keinen Sinn
+
+**Wochenend-Sonderfälle (Pro Tag, seit 0.9.0)** — `dayjs(date).day()` (0=So, 6=Sa) entscheidet:
+- **Samstag** wird komplett aus dem Soll/Ist-Vergleich ausgenommen (`level: 'none'`, taucht in der Liste gar nicht auf) — weder Minus- noch Überstunde, da an Samstagen kein 8h-Soll gilt
+- **Sonntag** bekommt ein eigenes Level `'sunday'`: `diff` bleibt `0` (fließt nicht in Saldo/Rebook-Summen ein), zählt aber zu "Tage mit Abweichung". Statt der ±Diff-Badge zeigt die Zeile die Gesamtstunden in Rot mit dem Hinweis „Sonntag — nicht erlaubt"
+- Betrifft nur die **Pro-Tag**-Ansicht — „Pro Projekt" kennt ohnehin keine Minusstunden und bleibt unverändert (kann an einem Samstag weiterhin Überstunden zählen, wenn ein Projekt dort allein >8h hat)
 
 **Pro Projekt** — bewusst einfacher als die Tagesansicht, zählt **nur**, wenn ein einzelnes Projekt an einem Tag für sich genommen mehr als 8h gebucht hat (keine anteilige Verteilung auf mehrere Projekte, keine Minusstunden — auf Wunsch in 0.7.6 wieder von 0.7.2 zurückgebaut):
 - Für jeden Tag und jedes Projekt: `overtime = max(0, Projektminuten_am_Tag − 480min)`
@@ -732,8 +737,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.8.0**
-**Aktuelle Doku-Version: v4.33**
+**Aktuelle App-Version: 0.9.0**
+**Aktuelle Doku-Version: v4.34**
 
 ### App-Versionshistorie
 
@@ -759,6 +764,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.7.7   | Fix: Source-Badge („manuell"/„E-Mail") in Verlauf und Woche hatte je nach Text unterschiedliche Breite, wodurch die danebenstehende Beschreibung je nach Eintragsquelle horizontal verschoben war. Badge hat jetzt eine feste Breite (zentriert) in `HistoryRow` (`HistoryPage.jsx`) und der Wochenansicht (`WeekPage.jsx`) |
 | 0.7.8   | Nachbesserung zu 0.7.7: die feste Badge-Breite ließ „E-Mail" ohne `white-space: nowrap` zweizeilig umbrechen (`manuell` passte zufällig auf eine Zeile). Beide Badges (`HistoryPage.jsx`, `WeekPage.jsx`) haben jetzt zusätzlich `whiteSpace: 'nowrap'` |
 | 0.8.0   | Verlauf: `GET /api/entries` sortiert Einträge innerhalb eines Tages jetzt aufsteigend (ältester zuerst) statt absteigend, konsistent mit `/api/day`/`/api/week`. Neu: `PUT /api/entries/{id}` verschiebt beim Ändern der Endzeit automatisch alle späteren Einträge desselben Tages um dieselbe Differenz mit (Start+Ende, Dauer bleibt gleich) — s. „Verlauf- und Stats-Filter". Smoke-Tests (`backend/tests/test_api.sh`) um beide Verhaltensweisen ergänzt |
+| 0.9.0   | Überstunden „Pro Tag" (Stats-Seite): das 8h-Soll gilt jetzt nur noch Mo-Fr — Samstage werden komplett aus dem Soll/Ist-Vergleich ausgenommen (bisher fälschlich als Minusstunde gewertet, wenn <8h gearbeitet wurde). Sonntage bekommen ein eigenes Warn-Level: Gesamtstunden in Rot mit Hinweis „Sonntag — nicht erlaubt", fließen aber nicht in den Saldo ein (`StatsPage.jsx`, `overtimeDays`) |
 
 ### Doku-Versionshistorie
 
@@ -810,3 +816,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.31   | Fix feste Breite für Source-Badge in Verlauf/Woche (s. App-Versionshistorie 0.7.7) |
 | v4.32   | Nachbesserung zu v4.31: `white-space: nowrap` gegen Umbruch im „E-Mail"-Badge ergänzt (s. App-Versionshistorie 0.7.8) |
 | v4.33   | Abschnitt „Verlauf- und Stats-Filter" um Sortierreihenfolge und automatische Zeitverschiebung beim Bearbeiten ergänzt, Endpoint-Tabelle „Einträge" entsprechend präzisiert (s. App-Versionshistorie 0.8.0) |
+| v4.34   | Abschnitt „Monatliche Überstunden (StatsPage)" um „Wochenend-Sonderfälle" ergänzt (Samstag ausgenommen, Sonntag als Warn-Level) (s. App-Versionshistorie 0.9.0) |

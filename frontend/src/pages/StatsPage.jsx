@@ -43,11 +43,17 @@ export default function StatsPage({ year, month, setYear, setMonth }) {
     acc[e.date] = (acc[e.date] || 0) + (e.duration_minutes || 0)
     return acc
   }, {})
-  // Jeder Arbeitstag (= Tag mit mind. einem Eintrag) zählt mit einem Soll von 8h.
+  // Das 8h-Soll gilt nur an Wochentagen (Mo-Fr) — Samstage werden komplett
+  // aus dem Soll/Ist-Vergleich ausgenommen (keine Minus-, aber auch keine
+  // Überstunde), Sonntage duerfen ueberhaupt nicht gearbeitet werden und
+  // bekommen dafuer ein eigenes, vom Saldo ausgenommenes Warn-Level.
   // diff > 0 → Überstunde, diff < 0 → Minusstunde (fehlt zum vollen Tag). Beides
   // fließt in den Saldo ein, damit z.B. ein 7h-Tag die Gesamtüberstunden wieder senkt.
   const overtimeDays = Object.entries(dayTotals)
     .map(([date, mins]) => {
+      const dow = dayjs(date).day() // 0 = So, 6 = Sa
+      if (dow === 0) return { date, mins, diff: 0, overtime: 0, mustRebook: 0, level: 'sunday' }
+      if (dow === 6) return { date, mins, diff: 0, overtime: 0, mustRebook: 0, level: 'none' }
       const diff = mins - WORK_DAY_MINUTES
       if (diff > 0) return { date, mins, diff, ...getOvertimeInfo(mins) }
       if (diff < 0) return { date, mins, diff, overtime: 0, mustRebook: 0, level: 'deficit' }
@@ -248,12 +254,24 @@ export default function StatsPage({ year, month, setYear, setMonth }) {
                     <div key={d.date} className="flex items-center justify-between" style={{ fontSize: 12 }}>
                       <div className="mono" style={{ color: 'var(--text2)' }}>{dayjs(d.date).format('ddd, D. MMM')}</div>
                       <div className="flex items-center gap-2">
-                        <span className="mono" style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtMinutes(d.mins)} gesamt</span>
-                        <span style={{
-                          fontFamily: 'var(--mono)', fontSize: 10, padding: '2px 6px', borderRadius: 'var(--r)',
-                          background: d.level === 'rebook' ? 'var(--red-dim)' : d.level === 'deficit' ? 'var(--bg4)' : 'var(--amber-dim)',
-                          color: d.level === 'rebook' ? 'var(--red)' : d.level === 'deficit' ? 'var(--text2)' : 'var(--amber)',
-                        }}>{fmtSigned(d.diff)}</span>
+                        {d.level === 'sunday' ? (
+                          <>
+                            <span className="mono" style={{ fontSize: 10, color: 'var(--red)' }}>Sonntag — nicht erlaubt</span>
+                            <span style={{
+                              fontFamily: 'var(--mono)', fontSize: 10, padding: '2px 6px', borderRadius: 'var(--r)',
+                              background: 'var(--red-dim)', color: 'var(--red)',
+                            }}>{fmtMinutes(d.mins)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="mono" style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtMinutes(d.mins)} gesamt</span>
+                            <span style={{
+                              fontFamily: 'var(--mono)', fontSize: 10, padding: '2px 6px', borderRadius: 'var(--r)',
+                              background: d.level === 'rebook' ? 'var(--red-dim)' : d.level === 'deficit' ? 'var(--bg4)' : 'var(--amber-dim)',
+                              color: d.level === 'rebook' ? 'var(--red)' : d.level === 'deficit' ? 'var(--text2)' : 'var(--amber)',
+                            }}>{fmtSigned(d.diff)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
