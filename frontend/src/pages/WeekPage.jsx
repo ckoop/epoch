@@ -7,6 +7,7 @@ import { fmtMinutes, fmtTime } from '../hooks/useTimer'
 import OvertimeBanner from './OvertimeBanner'
 import { ManualEntryModal } from './ManualEntryModal'
 import { EditEntryModal } from './EditEntryModal'
+import { CopyDayModal } from './CopyDayModal'
 
 dayjs.extend(isoWeek)
 dayjs.locale('de')
@@ -117,6 +118,7 @@ export default function WeekPage() {
 function DayCard({ day, today, onAddManual, onRefresh }) {
   const [expanded, setExpanded] = useState(false)
   const [showEdit, setShowEdit] = useState(null) // entry to edit
+  const [showCopy, setShowCopy] = useState(false)
   const d = dayjs(day.date)
   const isToday   = day.date === today
   const isWeekend = d.day() === 0 || d.day() === 6
@@ -136,6 +138,11 @@ function DayCard({ day, today, onAddManual, onRefresh }) {
           <OvertimeBanner totalMinutes={day.total_minutes} compact />
           {day.note?.note && <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{day.note.mood ? ['😞','😕','😐','🙂','😄'][day.note.mood-1]+' ' : ''}{day.note.note}</div>}
         </div>
+        {finished.length > 0 && (
+          <button className="btn-icon" onClick={e => { e.stopPropagation(); setShowCopy(true) }} title="Tag kopieren" style={{ color: 'var(--text3)' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        )}
         <button className="btn-icon" onClick={e => { e.stopPropagation(); onAddManual() }} title="Eintrag hinzufügen" style={{ color: 'var(--text3)' }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
@@ -165,6 +172,14 @@ function DayCard({ day, today, onAddManual, onRefresh }) {
           entry={showEdit}
           onClose={() => setShowEdit(null)}
           onSaved={() => { setShowEdit(null); onRefresh() }}
+        />
+      )}
+      {showCopy && (
+        <CopyDayModal
+          sourceDate={day.date}
+          entryCount={finished.length}
+          onClose={() => setShowCopy(false)}
+          onCopied={() => { setShowCopy(false); onRefresh() }}
         />
       )}
     </div>

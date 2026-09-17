@@ -32,6 +32,7 @@ export const api = {
   // Day / Week
   getDay:  (day)   => req(`/day/${day}`),
   getWeek: (start) => req('/week' + (start ? `?start=${start}` : '')),
+  copyDay: (day, targetDate) => req(`/day/${day}/copy`, { method: 'POST', body: JSON.stringify({ target_date: targetDate }) }),
 
   // Notes
   saveNote: (day, data) => req(`/notes/${day}`, { method: 'PUT', body: JSON.stringify(data) }),

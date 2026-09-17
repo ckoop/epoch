@@ -7,6 +7,7 @@ import { useProjectNames } from '../hooks/useProjects'
 import OvertimeBanner from './OvertimeBanner'
 import { ManualEntryModal } from './ManualEntryModal'
 import { EditEntryModal } from './EditEntryModal'
+import { CopyDayModal } from './CopyDayModal'
 
 dayjs.locale('de')
 
@@ -17,6 +18,7 @@ export default function HistoryPage({ projectFilter, setProjectFilter }) {
   const [to, setTo]             = useState(dayjs().format('YYYY-MM-DD'))
   const [showManual, setShowManual] = useState(false)
   const [showEdit, setShowEdit]     = useState(null) // entry to edit
+  const [showCopy, setShowCopy]     = useState(null) // date string
   const [taskFilter, setTaskFilter] = useState('')
   const { names: projectNames } = useProjectNames()
 
@@ -106,6 +108,9 @@ export default function HistoryPage({ projectFilter, setProjectFilter }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div className="mono" style={{ fontSize: 11 }}>{fmtMinutes(dayTotal)}</div>
                     <OvertimeBanner totalMinutes={dayTotal} compact />
+                    <button className="btn-icon" onClick={() => setShowCopy(date)} title="Tag kopieren" style={{ color: 'var(--text3)' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -131,6 +136,14 @@ export default function HistoryPage({ projectFilter, setProjectFilter }) {
           entry={showEdit}
           onClose={() => setShowEdit(null)}
           onSaved={() => { setShowEdit(null); load() }}
+        />
+      )}
+      {showCopy && (
+        <CopyDayModal
+          sourceDate={showCopy}
+          entryCount={grouped[showCopy]?.length || 0}
+          onClose={() => setShowCopy(null)}
+          onCopied={() => { setShowCopy(null); load() }}
         />
       )}
     </div>

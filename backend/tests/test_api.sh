@@ -202,6 +202,52 @@ curl_json GET "/entries?from_date=$TODAY&to_date=$TODAY"
 expect_jq "Folgeeintrag 2 bleibt bei reiner Beschreibungsaenderung unveraendert (Start 11:30)" \
   ".[] | select(.id == $FOLLOWUP2_ID) | .start_time | split(\"T\")[1]" "11:30:00"
 
+# ── 3c. Tag kopieren ─────────────────────────────────────────────────────────
+
+echo "== Tag kopieren =="
+
+# Weit in der Zukunft liegende Test-Tage verwenden (nicht $TODAY) — sonst wuerden
+# beim Kopieren eines echten Tages auch etwaige Produktiv-Eintraege desselben
+# Tages mitkopiert.
+COPY_SRC_DAY=$(date -d "+400 days" +%F)
+COPY_DST_DAY=$(date -d "+401 days" +%F)
+COPY_EMPTY_DAY=$(date -d "+402 days" +%F)
+
+curl_json POST /entries/manual "{\"date\":\"$COPY_SRC_DAY\",\"start_time\":\"09:00\",\"end_time\":\"10:00\",\"project\":\"$TEST_PROJECT\",\"description\":\"Kopiertest A\"}"
+expect_status "Quell-Eintrag A anlegen" 200
+COPY_SRC_ID_A=$(echo "$BODY_OUT" | jq -r '.id')
+
+curl_json POST /entries/manual "{\"date\":\"$COPY_SRC_DAY\",\"start_time\":\"10:00\",\"end_time\":\"11:30\",\"project\":\"$TEST_PROJECT\",\"description\":\"Kopiertest B\"}"
+expect_status "Quell-Eintrag B anlegen" 200
+COPY_SRC_ID_B=$(echo "$BODY_OUT" | jq -r '.id')
+
+curl_json POST "/day/$COPY_EMPTY_DAY/copy" "{\"target_date\":\"$COPY_DST_DAY\"}"
+expect_status "Kopieren eines Tages ohne Eintraege wird abgelehnt" 404
+
+curl_json POST "/day/$COPY_SRC_DAY/copy" "{\"target_date\":\"$COPY_DST_DAY\"}"
+expect_status "Tag kopieren" 200
+echo "$BODY_OUT" | jq -e 'length == 2' >/dev/null 2>&1
+check "Beide Eintraege wurden kopiert" "$?"
+
+curl_json GET "/day/$COPY_DST_DAY"
+expect_status "Zieltag abrufen" 200
+expect_jq "Zieltag hat 2 Eintraege" '.entries | length' "2"
+expect_jq "Kopie A behaelt Uhrzeit (Start 09:00)" \
+  '.entries[] | select(.description == "Kopiertest A") | .start_time | split("T")[1]' "09:00:00"
+expect_jq "Kopie B behaelt Dauer (90 Min)" \
+  '.entries[] | select(.description == "Kopiertest B") | .duration_minutes' "90.0"
+echo "$BODY_OUT" | jq -e '.entries | all(.source == 1)' >/dev/null 2>&1
+check "Kopierte Eintraege als 'manuell' markiert" "$?"
+
+# Aufraeumen — Quelle und Kopie liegen ausserhalb des von der generellen
+# Cleanup-Sektion abgedeckten $TODAY.
+curl_json GET "/day/$COPY_DST_DAY"
+for id in $(echo "$BODY_OUT" | jq -r '.entries[].id'); do
+  curl_json DELETE "/entries/$id"
+done
+curl_json DELETE "/entries/$COPY_SRC_ID_A"
+curl_json DELETE "/entries/$COPY_SRC_ID_B"
+
 # ── 4. Tag / Woche / Notiz ───────────────────────────────────────────────────
 
 echo "== Tag / Woche / Notiz =="

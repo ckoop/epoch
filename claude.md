@@ -111,7 +111,8 @@ timetracker/
             ├── SettingsPage.jsx     # Projektverwaltung (neu/umbenennen/Farbe/archiv) + Pomodoro- + Idle- + Push-Einstellungen (PushSettingsCard)
             ├── OvertimeBanner.jsx   # Überstunden-Anzeige (compact + full)
             ├── ManualEntryModal.jsx # Shared Modal für manuelle Einträge (rechnet lokale Zeit ↔ UTC um, s. useTimer.js)
-            └── EditEntryModal.jsx   # Shared Modal zum Bearbeiten bestehender Einträge — in Timer, Verlauf und Woche
+            ├── EditEntryModal.jsx   # Shared Modal zum Bearbeiten bestehender Einträge — in Timer, Verlauf und Woche
+            └── CopyDayModal.jsx     # Shared Modal „Tag kopieren" — Ziel-Datum wählen, ruft `POST /api/day/{day}/copy` — in Woche und Verlauf
 ```
 
 ---
@@ -237,10 +238,11 @@ timetracker/
 | GET    | /api/entries/descriptions | Query: `project?`, `limit` (Default 15). Distinkte `description`-Werte, sortiert nach Häufigkeit dann Aktualität (letztes Datum) — Datengrundlage für Autocomplete-Vorschläge |
 
 ### Tag / Woche
-| Method | Path           | Beschreibung                               |
-|--------|----------------|--------------------------------------------|
-| GET    | /api/day/{day} | Zusammenfassung eines Tages (YYYY-MM-DD)   |
-| GET    | /api/week      | 7 Tage ab `start` (Query: `start`)         |
+| Method | Path                | Beschreibung                               |
+|--------|---------------------|--------------------------------------------|
+| GET    | /api/day/{day}      | Zusammenfassung eines Tages (YYYY-MM-DD)   |
+| GET    | /api/week           | 7 Tage ab `start` (Query: `start`)         |
+| POST   | /api/day/{day}/copy | Body: `{ target_date }`. Kopiert alle abgeschlossenen Einträge des Tages (laufender Timer ausgenommen) auf `target_date` — Uhrzeiten/Projekt/Beschreibung bleiben erhalten, Kopien laufen als `source=1` (manuell). 404 falls der Quelltag keine abgeschlossenen Einträge hat |
 
 ### Notizen
 | Method | Path             | Body                      |
@@ -365,6 +367,8 @@ Alle Variablen optional — fehlen Credentials, ist Mail bzw. Push deaktiviert. 
 **Sortierung** — `GET /api/entries` (Datenquelle der HistoryPage) sortiert Tage absteigend (neuester zuerst), Einträge innerhalb eines Tages aber aufsteigend (ältester zuerst, erster Eintrag des Tages steht oben) — analog zu `/api/day` und `/api/week` (WeekPage, TimerPage), die schon vorher chronologisch aufsteigend sortiert waren.
 
 **Automatische Zeitverschiebung beim Bearbeiten** — wird beim Bearbeiten eines Eintrags (`EditEntryModal`) die Endzeit verändert, verschiebt `PUT /api/entries/{id}` (`backend/main.py`) alle späteren Einträge desselben Tages (`start_time >= alte Endzeit` vor der Änderung) automatisch um dieselbe Zeitdifferenz — Start und Ende gemeinsam, die jeweilige Dauer bleibt unverändert. So muss nach einer nachträglichen Zeitkorrektur (z.B. ein Meeting dauerte länger) nicht jeder Folgeeintrag manuell nachgezogen werden. Wird nur der Projektname/die Beschreibung geändert oder bleibt die Endzeit gleich, findet keine Verschiebung statt. Einträge *vor* dem bearbeiteten Eintrag sowie Einträge an anderen Tagen bleiben immer unangetastet.
+
+**Tag kopieren** — für Tage, die sich stark ähneln (`WeekPage.jsx`s `DayCard`, `HistoryPage.jsx`s Tages-Header), öffnet ein Kopier-Icon `CopyDayModal.jsx`, in dem ein Ziel-Datum gewählt wird (Default: morgen, bzw. heute falls der Quelltag nicht heute ist). `POST /api/day/{day}/copy` dupliziert alle abgeschlossenen Einträge des Quelltages auf das Ziel-Datum — Start-/Endzeit (Uhrzeit bleibt gleich, nur das Datum verschiebt sich), Projekt und Beschreibung werden übernommen, die Kopien laufen unabhängig von der Quelle als `source=1` (manuell). Der aktuell laufende Timer-Eintrag (falls der Quelltag heute ist) wird nie mitkopiert. Das Icon erscheint nur an Tagen mit mindestens einem abgeschlossenen Eintrag; ein Kopierversuch auf einen eintragslosen Tag liefert serverseitig 404. Tagesnotiz/Mood werden bewusst nicht mitkopiert (nur Zeiteinträge).
 
 **HistoryPage Projekt-Filter ist nach `App.jsx` hochgezogen** (`historyProject`/`setHistoryProject`, per Props an `HistoryPage` durchgereicht) — nicht mehr lokaler State der Seite. Grund: die Sidebar (siehe unten) muss den aktuell gewählten Wert kennen. `taskFilter` (Aufgaben-Suche) bleibt dagegen lokaler State in `HistoryPage`, da er nirgendwo sonst gebraucht wird.
 
@@ -737,8 +741,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.9.1**
-**Aktuelle Doku-Version: v4.35**
+**Aktuelle App-Version: 0.10.0**
+**Aktuelle Doku-Version: v4.36**
 
 ### App-Versionshistorie
 
@@ -766,6 +770,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.8.0   | Verlauf: `GET /api/entries` sortiert Einträge innerhalb eines Tages jetzt aufsteigend (ältester zuerst) statt absteigend, konsistent mit `/api/day`/`/api/week`. Neu: `PUT /api/entries/{id}` verschiebt beim Ändern der Endzeit automatisch alle späteren Einträge desselben Tages um dieselbe Differenz mit (Start+Ende, Dauer bleibt gleich) — s. „Verlauf- und Stats-Filter". Smoke-Tests (`backend/tests/test_api.sh`) um beide Verhaltensweisen ergänzt |
 | 0.9.0   | Überstunden „Pro Tag" (Stats-Seite): das 8h-Soll gilt jetzt nur noch Mo-Fr — Samstage werden komplett aus dem Soll/Ist-Vergleich ausgenommen (bisher fälschlich als Minusstunde gewertet, wenn <8h gearbeitet wurde). Sonntage bekommen ein eigenes Warn-Level: Gesamtstunden in Rot mit Hinweis „Sonntag — nicht erlaubt", fließen aber nicht in den Saldo ein (`StatsPage.jsx`, `overtimeDays`) |
 | 0.9.1   | Nachbesserung zu 0.9.0: Samstage zählen jetzt nicht mehr neutral (weder Minus- noch Überstunde), sondern komplett als Überstunde — jede am Samstag gebuchte Minute fließt voll in den Saldo ein (`diff = mins`, kein 8h-Abzug), `>10h`-Rebook-Warnung bleibt erhalten |
+| 0.10.0  | Feature: Tag kopieren — neues Kopier-Icon in Woche (`DayCard`) und Verlauf (Tages-Header) öffnet `CopyDayModal.jsx`, neuer Endpoint `POST /api/day/{day}/copy` dupliziert alle abgeschlossenen Einträge eines Tages (Uhrzeit/Projekt/Beschreibung) auf ein gewähltes Ziel-Datum als manuelle Einträge (s. „Verlauf- und Stats-Filter" → „Tag kopieren"). Smoke-Tests (`backend/tests/test_api.sh`) um Abschnitt „Tag kopieren" ergänzt |
 
 ### Doku-Versionshistorie
 
@@ -819,3 +824,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.33   | Abschnitt „Verlauf- und Stats-Filter" um Sortierreihenfolge und automatische Zeitverschiebung beim Bearbeiten ergänzt, Endpoint-Tabelle „Einträge" entsprechend präzisiert (s. App-Versionshistorie 0.8.0) |
 | v4.34   | Abschnitt „Monatliche Überstunden (StatsPage)" um „Wochenend-Sonderfälle" ergänzt (Samstag ausgenommen, Sonntag als Warn-Level) (s. App-Versionshistorie 0.9.0) |
 | v4.35   | Nachbesserung zu v4.34: „Wochenend-Sonderfälle" korrigiert — Samstag zählt komplett als Überstunde statt neutral (s. App-Versionshistorie 0.9.1) |
+| v4.36   | Neuer Abschnitt „Tag kopieren" unter „Verlauf- und Stats-Filter", Endpoint-Tabelle „Tag / Woche" um `POST /api/day/{day}/copy` ergänzt, Dateistruktur um `CopyDayModal.jsx` erweitert (s. App-Versionshistorie 0.10.0) |

@@ -201,6 +201,9 @@ class TimeEntryOut(BaseModel):
     paused_seconds: float
     model_config = {"from_attributes": True}
 
+class DayCopyRequest(BaseModel):
+    target_date: date
+
 class DayNoteUpsert(BaseModel):
     note: Optional[str] = None
     mood: Optional[int] = None
@@ -695,6 +698,23 @@ def get_week(start: Optional[date]=None, db: Session = Depends(get_db)):
         result.append(DaySummary(date=d, total_minutes=sum(e.duration_minutes or 0 for e in entries if e.end_time),
                                  entries=entries, note=note, active_entry=active))
     return result
+
+@app.post("/api/day/{day}/copy", response_model=List[TimeEntryOut])
+def copy_day(day: date, body: DayCopyRequest, db: Session = Depends(get_db)):
+    entries = db.query(TimeEntry).filter(TimeEntry.date == day, TimeEntry.end_time != None).order_by(TimeEntry.start_time).all()
+    if not entries:
+        raise HTTPException(404, "Keine abgeschlossenen Einträge an diesem Tag")
+    delta = datetime.combine(body.target_date, datetime.min.time()) - datetime.combine(day, datetime.min.time())
+    created = []
+    for e in entries:
+        copy = TimeEntry(start_time=e.start_time + delta, end_time=e.end_time + delta,
+                          duration_minutes=e.duration_minutes, date=body.target_date,
+                          project=e.project, description=e.description, source=1)
+        db.add(copy)
+        created.append(copy)
+    db.commit()
+    for c in created: db.refresh(c)
+    return created
 
 
 # ── Notes ───────────────────────────────────────────────────────────────────────
