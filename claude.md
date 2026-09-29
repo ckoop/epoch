@@ -94,15 +94,16 @@ timetracker/
         ├── App.jsx                  # Routing + BottomNav (7 Tabs)
         ├── api.js                   # Fetch-Wrapper für alle Endpoints
         ├── index.css                # Design Tokens + globale Styles
-        ├── FloatingWidget.jsx       # Document-Picture-in-Picture-Widget (Timer/Pomodoro, tab-unabhängig)
+        ├── FloatingWidget.jsx       # Document-Picture-in-Picture-Widget (Timer/Pomodoro/Freier Timer, im selben Fenster gestapelt, tab-unabhängig)
         ├── hooks/
         │   ├── useTimer.js          # Live-Timer Hook + Format-Helpers + Overtime
         │   ├── useProjects.js       # Shared project list mit Cache + invalidation
         │   ├── usePomodoro.js       # Pomodoro-Polling + Countdown + Sound/Notification
+        │   ├── useSimpleTimer.js    # Freier Timer (Stoppuhr/Countdown, kein Tracking-Bezug) — localStorage-State, kein Backend (s. „Freier Timer im Detail")
         │   ├── useIdleDetection.js  # Erkennt Inaktivität via visibilitychange, liefert Deduct-Prompt, Schwelle pro Gerät konfigurierbar
         │   └── usePushSubscription.js # Permission anfragen, VAPID Key holen, pushManager.subscribe(), Subscription ans Backend senden (s. „Push-Benachrichtigungen im Detail")
         └── pages/
-            ├── TimerPage.jsx        # Timer + Pomodoro-Card + manuelle Einträge + Tagesnotiz + Report
+            ├── TimerPage.jsx        # Timer + Pomodoro-Card + Freier Timer + manuelle Einträge + Tagesnotiz + Report
             ├── WeekPage.jsx         # Wochenübersicht + Balkendiagramm
             ├── HistoryPage.jsx      # Verlauf mit Datums-, Projekt- und Aufgaben-Filter
             ├── StatsPage.jsx        # Monatsstatistiken + Recharts, Projekt-Filter im Balkendiagramm, Überstunden Pro Tag/Pro Projekt
@@ -475,19 +476,39 @@ Beide laufen **rein clientseitig im offenen Tab** (Erkennung nur per Polling-Ver
 
 ---
 
+## Freier Timer im Detail
+
+Dritter Timer neben Projekt-Timer und Pomodoro — bewusst **komplett losgelöst vom Zeit-Tracking**: kein Bezug zu Projekten/Beschreibungen, kein Backend-Call, kein `time_entry`. Gedacht für spontanes Stoppen/Countdown (Kochtimer, kurze Pause, „5 Min. nachdenken"), nicht für erfasste Arbeitszeit.
+
+**Rein clientseitig (`hooks/useSimpleTimer.js`):** State `{ targetSeconds, running, startedAt, finished }` lebt nur in `localStorage` (Key `epoch_simple_timer`) und wird zentral in `App.jsx` gehalten (analog `usePomodoro()`), per Prop an `TimerPage` und `FloatingWidget` durchgereicht — überlebt dadurch Reload/Tab-Wechsel wie die beiden anderen Timer, ohne dass dafür ein Backend-Endpoint nötig ist.
+
+**Nur zwei Aktionen — Start und Reset**, kein Pause: `targetSeconds === 0` beim Start → Stoppuhr (zählt endlos hoch); `targetSeconds > 0` → Countdown, der bei 0 automatisch stoppt und in den `finished`-Zustand wechselt (rot), bis „Reset" gedrückt wird. Reset setzt `running`/`finished` zurück, behält aber `targetSeconds`, damit derselbe Countdown direkt erneut startbar ist.
+
+**Bei 0 färbt sich alles rot:** die Karte (`var(--red)`-Rahmen/Text), der Abschnitt im PiP-Widget, **und** — weil ein Nutzer den Tab dabei evtl. gar nicht offen hat — Favicon (`<link rel="icon">` wird zur Laufzeit auf eine rote Data-URI-Variante des Uhr-Icons umgebogen) und `document.title` (⁠„🔴 Fertig — Epoch"). Beides wird beim Reset auf den Originalwert zurückgesetzt (in `useSimpleTimer.js` zwischengespeichert).
+
+**Im Leerlauf eingeklappt:** `FreeTimerSection` (`TimerPage.jsx`) zeigt standardmäßig nur eine schmale, gestrichelte Zeile „⏱ Freier Timer (zählt nicht zur Zeiterfassung)" statt der vollen Karte — klappt bei Klick auf, und automatisch sobald er läuft oder fertig ist; ein ×-Icon im Leerlauf klappt wieder ein. Grund: die Karte ist sonst auf einer ohnehin dichten Timer-Seite dauerhaft sichtbar, obwohl sie nur gelegentlich gebraucht wird.
+
+**Optisch bewusst vom Tracking abgesetzt:** anders als der Projekt-Timer (Akzent-Grün) nutzt der freie Timer neutrale Farben (`var(--text)`/`var(--text2)`, kein `.pulse`-Grün) und einen gestrichelten statt durchgezogenen Kartenrahmen, dazu den permanenten Hinweistext „Zählt nicht zur Zeiterfassung" — verhindert, dass er optisch mit erfasster Arbeitszeit verwechselt wird (nur der `finished`-Zustand ist rot/durchgezogen, als bewusster Alarm-Kontrast).
+
+**Teilt sich das PiP-Fenster mit Timer/Pomodoro** statt ein eigenes zu öffnen — Browser erlauben ohnehin nur ein Document-PiP-Fenster pro Tab gleichzeitig (s. „Schwebendes Fenster" unten).
+
+---
+
 ## Schwebendes Fenster (Floating Widget) im Detail
 
 Zeigt laufenden Timer bzw. laufende Pomodoro-Session in einem eigenen, immer-im-Vordergrund-Fenster — bleibt sichtbar auch wenn ein anderer Browser-Tab oder ein anderes Programm aktiv ist. Implementiert über die **Document Picture-in-Picture API** (`window.documentPictureInPicture.requestWindow()`), nicht über einen eigenen Prozess — es ist dasselbe Tab/dieselbe JS-Realm, nur mit einem zweiten, always-on-top Browser-Fenster als zusätzlichem Render-Ziel.
 
-**`usePipWidget()` (`FloatingWidget.jsx`)** kapselt Öffnen/Schließen: `open()` muss aus einem echten User-Klick heraus aufgerufen werden (Browser-Vorgabe für PiP), erzeugt darum den `📌`/`🗗`-Button (`PipButton` in `TimerPage.jsx`) direkt in `RunningTimer`/`PomodoroCard`. Der Hook lebt in `App.jsx` (nicht in `TimerPage.jsx`), damit das Fenster beim Wechsel der Route (z.B. während eines normalen, nicht Pomodoro-gebundenen Timers) nicht durch Unmount geschlossen wird.
+**`usePipWidget()` (`FloatingWidget.jsx`)** kapselt Öffnen/Schließen: `open()` muss aus einem echten User-Klick heraus aufgerufen werden (Browser-Vorgabe für PiP), erzeugt darum den `📌`/`🗗`-Button (`PipButton` in `TimerPage.jsx`) direkt in `RunningTimer`/`PomodoroCard`/`FreeTimerCard` — alle drei teilen sich denselben `pip`-Hook-Zustand, ein Klick auf einen der drei Buttons öffnet/schließt also immer dasselbe eine Fenster. Der Hook lebt in `App.jsx` (nicht in `TimerPage.jsx`), damit das Fenster beim Wechsel der Route (z.B. während eines normalen, nicht Pomodoro-gebundenen Timers) nicht durch Unmount geschlossen wird.
 
 **Styles werden 1:1 aus dem Haupttab übernommen** (`copyStyles()`): iteriert `document.styleSheets`, hängt für `<link>`-Stylesheets (Google Fonts, Vite-Bundle-CSS) ein neues `<link>` mit derselben `href` ins PiP-`<head>`, für Inline-`<style>`-Tags eine Kopie des `textContent` — dadurch sind CSS-Variablen (`--accent`, `--bg`, …) und Klassen (`.tag`, `.pulse`, `.mono`) im PiP-Dokument identisch verfügbar, ohne `cssRules` cross-origin auslesen zu müssen (würde bei Google Fonts an CORS scheitern).
 
-**Inhalt via `createPortal`:** `<FloatingWidget pipWindow={pip.pipWindow} activeTimer={activeTimer} pomodoro={pomodoro} />` (in `App.jsx`, außerhalb der `<Routes>`) rendert bei offenem PiP-Fenster denselben Timer-/Pomodoro-State per React-Portal in `pipWindow.document.body` — kein separates Polling/Ticking nötig, der Countdown läuft über denselben `useTimer`-Hook wie in der normalen Ansicht.
+**Inhalt via `createPortal`:** `<FloatingWidget pipWindow={pip.pipWindow} activeTimer={activeTimer} pomodoro={pomodoro} simpleTimer={simpleTimer} />` (in `App.jsx`, außerhalb der `<Routes>`) rendert bei offenem PiP-Fenster denselben Timer-/Pomodoro-/Freier-Timer-State per React-Portal in `pipWindow.document.body` — kein separates Polling/Ticking nötig, der Countdown läuft über denselben `useTimer`-Hook wie in der normalen Ansicht. Da es nur **ein** PiP-Fenster gibt (Browser-Limit), zeigt `WidgetContent` bei Bedarf **beide zugleich gestapelt** — Projekt-Timer **oder** Pomodoro (oben) plus den freien Timer (unten, per Trennlinie abgesetzt, kompakter skaliert), falls beide gleichzeitig aktiv sind. Ist nur der freie Timer aktiv, füllt er allein das Fenster.
 
-**Automatisches Schließen:** Ein `useEffect` in `App.jsx` schließt das PiP-Fenster, sobald weder `activeTimer` noch eine Pomodoro-Session mehr aktiv ist (`pip.pipWindow.close()` löst intern das `pagehide`-Event aus, das den Hook-State zurücksetzt).
+**Automatisches Schließen:** Ein `useEffect` in `App.jsx` schließt das PiP-Fenster, sobald weder `activeTimer` noch eine Pomodoro-Session noch der freie Timer (`running`/`finished`) mehr aktiv ist (`pip.pipWindow.close()` löst intern das `pagehide`-Event aus, das den Hook-State zurücksetzt).
 
 **Browser-Support:** Document Picture-in-Picture ist aktuell **Desktop-Chromium-only** (Chrome/Edge/Brave ≥ 116 auf Windows/Mac/Linux). Auf Mobil (Android/iOS) fehlt die API in **jedem** Browser, auch in mobilem Chrome/Brave/Edge — Chromium hat sie dort bislang nicht implementiert, unabhängig vom Browser-Anbieter. `PIP_SUPPORTED`-Flag (`'documentPictureInPicture' in window`) blendet den Button entsprechend überall aus, wo die API fehlt (Firefox, Safari, alle mobilen Browser) — kein Fallback nötig, Kernfunktion (Timer starten/stoppen) bleibt unberührt.
+
+**Secure-Context-Hinweis statt stillem Verschwinden (seit 0.11.2):** die API fehlt zusätzlich auf jeder unverschlüsselten HTTP-Verbindung außerhalb von `localhost` (s. „HTTPS (selbstsigniertes Zertifikat)"), auch in einem grundsätzlich unterstützten Browser — das ist von außen nicht von „Browser kann das generell nicht" zu unterscheiden. `PIP_NEEDS_HTTPS`-Flag (`!PIP_SUPPORTED && !window.isSecureContext`) grenzt beide Fälle sauber ab: nur wenn wirklich HTTPS der fehlende Faktor ist, zeigt `PipButton` statt des Buttons ein kleines Schloss-Icon mit Tooltip („Schwebendes Fenster nur über HTTPS verfügbar (Port 3443 statt 8030)"). Bei generell fehlender Browser-Unterstützung (Firefox, Safari) bleibt es weiterhin komplett still, um dort keinen irreführenden „nutz HTTPS"-Hinweis zu zeigen, der das Problem gar nicht lösen würde.
 
 ---
 
@@ -678,7 +699,7 @@ Manche Browser-APIs verlangen einen **Secure Context** (HTTPS oder `localhost`) 
 - **Zeitzone** — Backend speichert konsequent UTC (Timer wie manuelle/bearbeitete Einträge, s. `localTimeToUTC`/`utcToLocalTime` in `useTimer.js`), Anzeige rechnet immer in die Browser-Lokalzeit um; bei Zugriff aus unterschiedlichen Zeitzonen zeigt jeder Browser dieselbe absolute Zeit entsprechend seiner eigenen Zeitzone an (kein DB-Problem, aber ggf. gewöhnungsbedürftig bei Multi-Timezone-Nutzung). Mail-Import (`_local_hhmm_to_utc()`) hat mangels Browser-Kontext `Europe/Berlin` **hartkodiert** als Ortszeit der Mail-Uhrzeiten — bei Nutzung aus einer anderen Zeitzone müsste das konfigurierbar gemacht werden (s. App-Versionshistorie 0.7.1)
 - **Keine Authentifizierung** — für lokales Netz ausreichend; für Internet: Basic Auth in Nginx empfohlen
 - **Kein Offline-Betrieb** — seit v0.6.0 gibt es einen Service Worker (`public/sw.js`), der ist aber nur für Web-Push zuständig und cached nichts; ohne Netzwerkverbindung lädt die PWA also weiterhin nicht
-- **Schwebendes Fenster (Document Picture-in-Picture)** — nur Desktop-Chromium (Chrome/Edge/Brave ≥ 116); auf Mobil (Android/iOS) fehlt die API in allen Browsern, Button dort ausgeblendet. Zusätzlich verlangt die API einen **Secure Context** (HTTPS oder `localhost`) — über reines HTTP auf einer LAN-IP/einem Hostnamen bleibt der Button ausgeblendet, selbst in einem unterstützten Browser (s. „HTTPS (selbstsigniertes Zertifikat)")
+- **Schwebendes Fenster (Document Picture-in-Picture)** — nur Desktop-Chromium (Chrome/Edge/Brave ≥ 116); auf Mobil (Android/iOS) fehlt die API in allen Browsern, Button dort ausgeblendet. Zusätzlich verlangt die API einen **Secure Context** (HTTPS oder `localhost`) — über reines HTTP auf einer LAN-IP/einem Hostnamen zeigt ein unterstützter Browser seit 0.11.2 statt des Buttons ein Schloss-Icon mit HTTPS-Hinweis statt ihn kommentarlos auszublenden (s. „Schwebendes Fenster im Detail", „HTTPS (selbstsigniertes Zertifikat)")
 - **Projekte in Einträgen** — Umbenennen eines Projekts ändert **nicht** die bestehenden Einträge (String-Referenz); bei Umbenennung bleibt der alte Name in historischen Einträgen erhalten
 - **Idle-Erkennung** — basiert auf `visibilitychange`, nicht auf echter Maus-/Tastatur-Inaktivität; erkennt zuverlässig Rechner sperren/Tab wechseln, aber nicht "Tab bleibt offen sichtbar, aber Nutzer ist einfach weg" (z.B. Bildschirm bleibt an); Schwelle ist in den Settings konfigurierbar, aber **pro Gerät** (localStorage) — synct nicht zwischen Geräten wie die Pomodoro-Settings
 
@@ -741,8 +762,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.10.0**
-**Aktuelle Doku-Version: v4.36**
+**Aktuelle App-Version: 0.11.2**
+**Aktuelle Doku-Version: v4.39**
 
 ### App-Versionshistorie
 
@@ -771,6 +792,9 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.9.0   | Überstunden „Pro Tag" (Stats-Seite): das 8h-Soll gilt jetzt nur noch Mo-Fr — Samstage werden komplett aus dem Soll/Ist-Vergleich ausgenommen (bisher fälschlich als Minusstunde gewertet, wenn <8h gearbeitet wurde). Sonntage bekommen ein eigenes Warn-Level: Gesamtstunden in Rot mit Hinweis „Sonntag — nicht erlaubt", fließen aber nicht in den Saldo ein (`StatsPage.jsx`, `overtimeDays`) |
 | 0.9.1   | Nachbesserung zu 0.9.0: Samstage zählen jetzt nicht mehr neutral (weder Minus- noch Überstunde), sondern komplett als Überstunde — jede am Samstag gebuchte Minute fließt voll in den Saldo ein (`diff = mins`, kein 8h-Abzug), `>10h`-Rebook-Warnung bleibt erhalten |
 | 0.10.0  | Feature: Tag kopieren — neues Kopier-Icon in Woche (`DayCard`) und Verlauf (Tages-Header) öffnet `CopyDayModal.jsx`, neuer Endpoint `POST /api/day/{day}/copy` dupliziert alle abgeschlossenen Einträge eines Tages (Uhrzeit/Projekt/Beschreibung) auf ein gewähltes Ziel-Datum als manuelle Einträge (s. „Verlauf- und Stats-Filter" → „Tag kopieren"). Smoke-Tests (`backend/tests/test_api.sh`) um Abschnitt „Tag kopieren" ergänzt |
+| 0.11.0  | Feature: Freier Timer — dritter, komplett vom Tracking losgelöster Timer (Stoppuhr/Countdown, kein Backend, `localStorage`-State via neuem `useSimpleTimer.js`). Nur Start/Reset, zählt bei `targetSeconds=0` hoch (Stoppuhr) sonst runter bis 0 und wird dann rot (Karte, PiP-Widget, Favicon, Tab-Titel). Teilt sich das bestehende PiP-Fenster mit Timer/Pomodoro (s. „Freier Timer im Detail") |
+| 0.11.1  | Fix/Politur zu 0.11.0: `FreeTimerSection` zeigt im Leerlauf nur noch eine schmale, eingeklappte Zeile statt der vollen Karte (klappt bei Klick/Start auf), Farbe/Rahmen jetzt neutral statt Akzent-Grün + dauerhafter Hinweistext „Zählt nicht zur Zeiterfassung", damit der freie Timer optisch nicht mit erfasster Arbeitszeit verwechselt wird |
+| 0.11.2  | Fix: `PipButton` zeigt auf einer unverschlüsselten HTTP-Verbindung außerhalb von `localhost` jetzt ein Schloss-Icon mit HTTPS-Hinweis statt komplett zu verschwinden — neues `PIP_NEEDS_HTTPS`-Flag (`FloatingWidget.jsx`) unterscheidet „braucht nur HTTPS" von „Browser kann das grundsätzlich nicht" (Firefox/Safari bleiben weiterhin still) |
 
 ### Doku-Versionshistorie
 
@@ -825,3 +849,6 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.34   | Abschnitt „Monatliche Überstunden (StatsPage)" um „Wochenend-Sonderfälle" ergänzt (Samstag ausgenommen, Sonntag als Warn-Level) (s. App-Versionshistorie 0.9.0) |
 | v4.35   | Nachbesserung zu v4.34: „Wochenend-Sonderfälle" korrigiert — Samstag zählt komplett als Überstunde statt neutral (s. App-Versionshistorie 0.9.1) |
 | v4.36   | Neuer Abschnitt „Tag kopieren" unter „Verlauf- und Stats-Filter", Endpoint-Tabelle „Tag / Woche" um `POST /api/day/{day}/copy` ergänzt, Dateistruktur um `CopyDayModal.jsx` erweitert (s. App-Versionshistorie 0.10.0) |
+| v4.37   | Neuer Abschnitt „Freier Timer im Detail", Dateistruktur um `useSimpleTimer.js` erweitert, „Schwebendes Fenster im Detail" um Drei-Timer-Stacking im selben PiP-Fenster ergänzt (s. App-Versionshistorie 0.11.0) |
+| v4.38   | „Freier Timer im Detail" um eingeklappten Leerlauf-Zustand und optische Abgrenzung vom Tracking ergänzt (s. App-Versionshistorie 0.11.1) |
+| v4.39   | „Schwebendes Fenster im Detail" und „Bekannte Einschränkungen" um Secure-Context-Hinweis (Schloss-Icon statt stillem Verschwinden) ergänzt (s. App-Versionshistorie 0.11.2) |
