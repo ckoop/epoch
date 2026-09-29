@@ -124,9 +124,7 @@ export default function TimerPage({ activeTimer, setActiveTimer, pomodoro, simpl
       </div>
 
       {/* Freier Timer — losgelöst vom Tracking */}
-      <div className="card" style={{ marginBottom: 12, borderColor: simpleTimer.finished ? 'var(--red)' : (simpleTimer.running ? 'rgba(200,240,96,.25)' : 'var(--border)') }}>
-        <FreeTimerCard simpleTimer={simpleTimer} pip={pip} />
-      </div>
+      <FreeTimerSection simpleTimer={simpleTimer} pip={pip} />
 
       {/* Manual entry button */}
       <button className="btn btn-ghost w-full" style={{ marginBottom: 16, justifyContent: 'center' }} onClick={() => setShowManual(true)}>
@@ -244,25 +242,58 @@ function PipButton({ pip }) {
 }
 
 // ── Freier Timer (Stoppuhr/Countdown, ohne Task-Bezug) ──────────────────────────
-function FreeTimerCard({ simpleTimer, pip }) {
+// Bewusst neutral statt Akzent-Grün eingefärbt und mit gestricheltem Rahmen, damit
+// er sich optisch klar vom Projekt-Timer/Tracking abhebt (zählt nicht mit).
+function FreeTimerSection({ simpleTimer, pip }) {
+  const [expanded, setExpanded] = useState(false)
+  const { running, finished } = simpleTimer
+  const showFull = running || finished || expanded
+
+  if (!showFull) {
+    return (
+      <button
+        className="btn btn-ghost w-full"
+        style={{ marginBottom: 12, justifyContent: 'center', borderStyle: 'dashed' }}
+        onClick={() => setExpanded(true)}
+      >
+        ⏱ Freier Timer <span style={{ color: 'var(--text3)', marginLeft: 4 }}>(zählt nicht zur Zeiterfassung)</span>
+      </button>
+    )
+  }
+
+  const borderColor = finished ? 'var(--red)' : 'var(--border2)'
+  return (
+    <div className="card" style={{ marginBottom: 12, borderColor, borderStyle: finished ? 'solid' : 'dashed' }}>
+      <FreeTimerCard simpleTimer={simpleTimer} pip={pip} onCollapse={() => setExpanded(false)} />
+    </div>
+  )
+}
+
+function FreeTimerCard({ simpleTimer, pip, onCollapse }) {
   const { targetSeconds, setTargetSeconds, running, finished, isCountdown, remainingMs, elapsedMs, start, reset } = simpleTimer
   const idle = !running && !finished
-  const color = finished ? 'var(--red)' : (running ? 'var(--accent)' : 'var(--text)')
+  const color = finished ? 'var(--red)' : 'var(--text)'
   const minutes = Math.floor(targetSeconds / 60)
   const seconds = targetSeconds % 60
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         {finished ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', flexShrink: 0 }} />
-          : running ? <span className="pulse" />
+          : running ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text2)', flexShrink: 0 }} />
           : null}
         <span className="mono" style={{ fontSize: 10, color, textTransform: 'uppercase', letterSpacing: '.1em' }}>
           {finished ? 'Fertig!' : running ? 'Läuft' : 'Freier Timer'}
         </span>
         <span style={{ marginLeft: 'auto' }} />
         <PipButton pip={pip} />
+        {idle && onCollapse && (
+          <button className="btn-icon" onClick={onCollapse} title="Einklappen">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        )}
       </div>
+      <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 16 }}>Zählt nicht zur Zeiterfassung</div>
 
       {idle ? (
         <>

@@ -129,11 +129,11 @@ function PomodoroWidget({ pomodoro, compact }) {
 
 function FreeTimerWidget({ simpleTimer, compact }) {
   const { isCountdown, remainingMs, elapsedMs, finished } = simpleTimer
-  const color = finished ? 'var(--red)' : 'var(--accent)'
+  const color = finished ? 'var(--red)' : 'var(--text)'
   return (
     <div>
       <div style={row}>
-        {finished ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', flexShrink: 0 }} /> : <span className="pulse" />}
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: finished ? 'var(--red)' : 'var(--text2)', flexShrink: 0 }} />
         <span className="mono" style={{ ...label, color }}>{finished ? 'Fertig' : 'Freier Timer'}</span>
       </div>
       <div className="mono" style={{ ...time(compact), color }}>{fmtDuration(isCountdown ? remainingMs : elapsedMs)}</div>
