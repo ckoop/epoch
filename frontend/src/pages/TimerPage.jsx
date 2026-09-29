@@ -13,7 +13,7 @@ dayjs.locale('de')
 
 const MOODS    = ['😞', '😕', '😐', '🙂', '😄']
 
-export default function TimerPage({ activeTimer, setActiveTimer, pomodoro, pip }) {
+export default function TimerPage({ activeTimer, setActiveTimer, pomodoro, simpleTimer, pip }) {
   const [project, setProject]       = useState('Allgemein')
   const [description, setDescription] = useState('')
   const [loading, setLoading]       = useState(false)
@@ -121,6 +121,11 @@ export default function TimerPage({ activeTimer, setActiveTimer, pomodoro, pip }
         ) : (
           <StartTimer project={project} setProject={setProject} description={description} setDescription={setDescription} onStart={handleStart} loading={loading} projectNames={projectNames} pomodoroEnabled={pomodoroEnabled} onStartPomodoro={() => pomodoro.start({ project, description: description || undefined }).then(() => setDescription(''))} />
         )}
+      </div>
+
+      {/* Freier Timer — losgelöst vom Tracking */}
+      <div className="card" style={{ marginBottom: 12, borderColor: simpleTimer.finished ? 'var(--red)' : (simpleTimer.running ? 'rgba(200,240,96,.25)' : 'var(--border)') }}>
+        <FreeTimerCard simpleTimer={simpleTimer} pip={pip} />
       </div>
 
       {/* Manual entry button */}
@@ -235,6 +240,68 @@ function PipButton({ pip }) {
     <button className="btn-icon" onClick={pip.toggle} title={pip.pipWindow ? 'Schwebendes Fenster schließen' : 'In schwebendem Fenster anzeigen'}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor" stroke="none"/></svg>
     </button>
+  )
+}
+
+// ── Freier Timer (Stoppuhr/Countdown, ohne Task-Bezug) ──────────────────────────
+function FreeTimerCard({ simpleTimer, pip }) {
+  const { targetSeconds, setTargetSeconds, running, finished, isCountdown, remainingMs, elapsedMs, start, reset } = simpleTimer
+  const idle = !running && !finished
+  const color = finished ? 'var(--red)' : (running ? 'var(--accent)' : 'var(--text)')
+  const minutes = Math.floor(targetSeconds / 60)
+  const seconds = targetSeconds % 60
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        {finished ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', flexShrink: 0 }} />
+          : running ? <span className="pulse" />
+          : null}
+        <span className="mono" style={{ fontSize: 10, color, textTransform: 'uppercase', letterSpacing: '.1em' }}>
+          {finished ? 'Fertig!' : running ? 'Läuft' : 'Freier Timer'}
+        </span>
+        <span style={{ marginLeft: 'auto' }} />
+        <PipButton pip={pip} />
+      </div>
+
+      {idle ? (
+        <>
+          <div className="label" style={{ marginBottom: 9 }}>Countdown einstellen (optional — bei 0 läuft er als Stoppuhr)</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <TimeField label="Minuten" value={minutes} onChange={m => setTargetSeconds(m * 60 + seconds)} />
+            <TimeField label="Sekunden" value={seconds} max={59} onChange={s => setTargetSeconds(minutes * 60 + s)} />
+          </div>
+          <button className="btn btn-primary" style={{ width: '100%' }} onClick={start}>▶ Start</button>
+        </>
+      ) : (
+        <>
+          <div className="mono" style={{ fontSize: 50, fontWeight: 300, color, letterSpacing: '-.02em', lineHeight: 1, marginBottom: 18 }}>
+            {fmtDuration(isCountdown ? remainingMs : elapsedMs)}
+          </div>
+          <button className="btn btn-danger" style={{ width: '100%' }} onClick={reset}>↺ Reset</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function TimeField({ label, value, onChange, max }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <div className="label" style={{ marginBottom: 5, fontSize: 9 }}>{label}</div>
+      <input
+        type="number"
+        min={0}
+        max={max}
+        value={value}
+        onChange={e => {
+          const raw = e.target.value
+          if (raw === '') { onChange(0); return }
+          const n = parseInt(raw, 10)
+          if (!Number.isNaN(n)) onChange(Math.min(max ?? Infinity, Math.max(0, n)))
+        }}
+      />
+    </div>
   )
 }
 

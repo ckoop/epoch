@@ -49,36 +49,53 @@ export function usePipWidget() {
   return { supported: PIP_SUPPORTED, pipWindow, open, close, toggle }
 }
 
-export default function FloatingWidget({ pipWindow, activeTimer, pomodoro }) {
+export default function FloatingWidget({ pipWindow, activeTimer, pomodoro, simpleTimer }) {
   if (!pipWindow) return null
-  return createPortal(<WidgetContent activeTimer={activeTimer} pomodoro={pomodoro} />, pipWindow.document.body)
+  return createPortal(<WidgetContent activeTimer={activeTimer} pomodoro={pomodoro} simpleTimer={simpleTimer} />, pipWindow.document.body)
 }
 
-function WidgetContent({ activeTimer, pomodoro }) {
+function WidgetContent({ activeTimer, pomodoro, simpleTimer }) {
   const pomodoroActive = !!pomodoro?.state?.phase
-  if (pomodoroActive) return <PomodoroWidget pomodoro={pomodoro} />
-  if (activeTimer) return <TimerWidget activeTimer={activeTimer} />
-  return <div style={{ ...wrap, alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 12 }}>Kein Timer aktiv</div>
+  const simpleTimerActive = !!simpleTimer && (simpleTimer.running || simpleTimer.finished)
+  const isStacked = (pomodoroActive || !!activeTimer) && simpleTimerActive
+
+  const main = pomodoroActive
+    ? <PomodoroWidget pomodoro={pomodoro} compact={isStacked} />
+    : activeTimer
+    ? <TimerWidget activeTimer={activeTimer} compact={isStacked} />
+    : null
+
+  if (!main && !simpleTimerActive) {
+    return <div style={{ ...wrap, alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 12 }}>Kein Timer aktiv</div>
+  }
+
+  return (
+    <div style={{ ...wrap, gap: 10, background: (!main && simpleTimer?.finished) ? 'var(--red-dim)' : undefined }}>
+      {main}
+      {isStacked && <div style={{ borderTop: '1px solid var(--border)' }} />}
+      {simpleTimerActive && <FreeTimerWidget simpleTimer={simpleTimer} compact={isStacked} />}
+    </div>
+  )
 }
 
-function TimerWidget({ activeTimer }) {
+function TimerWidget({ activeTimer, compact }) {
   const elapsed = useTimer(activeTimer.start_time, activeTimer.paused_at, activeTimer.paused_seconds)
   const isPaused = !!activeTimer.paused_at
   const color = isPaused ? 'var(--amber)' : 'var(--accent)'
   return (
-    <div style={wrap}>
+    <div>
       <div style={row}>
         {isPaused ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)', flexShrink: 0 }} /> : <span className="pulse" />}
         <span className="mono" style={{ ...label, color }}>{isPaused ? 'Pausiert' : 'Läuft'}</span>
         <span className="tag tag-g" style={{ marginLeft: 'auto' }}>{activeTimer.project}</span>
       </div>
-      <div className="mono" style={{ ...time, color }}>{fmtDuration(elapsed)}</div>
+      <div className="mono" style={{ ...time(compact), color }}>{fmtDuration(elapsed)}</div>
       {activeTimer.description && <div style={desc}>{activeTimer.description}</div>}
     </div>
   )
 }
 
-function PomodoroWidget({ pomodoro }) {
+function PomodoroWidget({ pomodoro, compact }) {
   const { state, settings, remainingMs } = pomodoro
   const phase = state.phase
   const phaseLabel = POMODORO_PHASE_LABELS[phase] || phase
@@ -88,7 +105,7 @@ function PomodoroWidget({ pomodoro }) {
   const cyclesFilled = state.cycles_completed % cyclesTotal
 
   return (
-    <div style={wrap}>
+    <div>
       <div style={row}>
         {state.awaiting_confirmation ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)', flexShrink: 0 }} /> : <span className="pulse" />}
         <span className="mono" style={{ ...label, color }}>🍅 {phaseLabel}</span>
@@ -98,7 +115,7 @@ function PomodoroWidget({ pomodoro }) {
         <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 6 }}>{phaseLabel} bereit — weiter?</div>
       ) : (
         <>
-          <div className="mono" style={{ ...time, color }}>{fmtDuration(remainingMs)}</div>
+          <div className="mono" style={{ ...time(compact), color }}>{fmtDuration(remainingMs)}</div>
           <div style={{ display: 'flex', gap: 5, marginTop: 8 }}>
             {Array.from({ length: cyclesTotal }).map((_, i) => (
               <span key={i} style={{ width: 7, height: 7, borderRadius: '50%', background: i < cyclesFilled ? 'var(--accent)' : 'var(--border2)' }} />
@@ -110,8 +127,22 @@ function PomodoroWidget({ pomodoro }) {
   )
 }
 
+function FreeTimerWidget({ simpleTimer, compact }) {
+  const { isCountdown, remainingMs, elapsedMs, finished } = simpleTimer
+  const color = finished ? 'var(--red)' : 'var(--accent)'
+  return (
+    <div>
+      <div style={row}>
+        {finished ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', flexShrink: 0 }} /> : <span className="pulse" />}
+        <span className="mono" style={{ ...label, color }}>{finished ? 'Fertig' : 'Freier Timer'}</span>
+      </div>
+      <div className="mono" style={{ ...time(compact), color }}>{fmtDuration(isCountdown ? remainingMs : elapsedMs)}</div>
+    </div>
+  )
+}
+
 const wrap  = { fontFamily: 'var(--sans)', color: 'var(--text)', padding: '14px 16px', height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }
 const row   = { display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }
 const label = { fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em' }
-const time  = { fontSize: 34, fontWeight: 300, letterSpacing: '-.02em', lineHeight: 1 }
+const time  = (compact) => ({ fontSize: compact ? 22 : 34, fontWeight: 300, letterSpacing: '-.02em', lineHeight: 1 })
 const desc  = { fontSize: 11, color: 'var(--text2)', marginTop: 4 }

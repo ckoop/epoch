@@ -12,12 +12,13 @@ import SettingsPage from './pages/SettingsPage'
 import { api } from './api'
 import { useTimer, fmtDuration } from './hooks/useTimer'
 import { usePomodoro } from './hooks/usePomodoro'
+import { useSimpleTimer } from './hooks/useSimpleTimer'
 import { useIdleDetection } from './hooks/useIdleDetection'
 import FloatingWidget, { usePipWidget } from './FloatingWidget'
 
 dayjs.extend(isoWeek)
 
-export const APP_VERSION = '0.10.0'
+export const APP_VERSION = '0.11.0'
 
 const NAV = [
   { to: '/',        label: 'Timer',   Icon: IcoTimer   },
@@ -37,6 +38,7 @@ export default function App() {
   const [imapConfigured, setImapConfigured] = useState(null)
   const pomodoro = usePomodoro()
   const pomodoroActive = !!pomodoro.state?.phase
+  const simpleTimer = useSimpleTimer()
   const pip = usePipWidget()
   const [idleLoading, setIdleLoading] = useState(false)
   const idle = useIdleDetection(!!activeTimer && !activeTimer.paused_at)
@@ -45,8 +47,8 @@ export default function App() {
 
   // Schwebendes Fenster automatisch schließen, sobald weder Timer noch Pomodoro laufen
   useEffect(() => {
-    if (pip.pipWindow && !activeTimer && !pomodoroActive) pip.pipWindow.close()
-  }, [pip.pipWindow, activeTimer, pomodoroActive])
+    if (pip.pipWindow && !activeTimer && !pomodoroActive && !simpleTimer.running && !simpleTimer.finished) pip.pipWindow.close()
+  }, [pip.pipWindow, activeTimer, pomodoroActive, simpleTimer.running, simpleTimer.finished])
 
   const handleIdleDeduct = async () => {
     if (!idle.prompt) return
@@ -108,7 +110,7 @@ export default function App() {
       <Sidebar hasActive={!!activeTimer} isPaused={isPaused} badges={badges} locked={pomodoroActive} />
       <div className="main-area">
         <Routes>
-          <Route path="/"        element={<TimerPage   activeTimer={activeTimer} setActiveTimer={setActiveTimer} pomodoro={pomodoro} pip={pip} />} />
+          <Route path="/"        element={<TimerPage   activeTimer={activeTimer} setActiveTimer={setActiveTimer} pomodoro={pomodoro} simpleTimer={simpleTimer} pip={pip} />} />
           <Route path="/woche"   element={<WeekPage />} />
           <Route path="/verlauf" element={<HistoryPage projectFilter={historyProject} setProjectFilter={setHistoryProject} />} />
           <Route path="/stats"   element={<StatsPage year={statsYear} month={statsMonth} setYear={setStatsYear} setMonth={setStatsMonth} />} />
@@ -118,7 +120,7 @@ export default function App() {
         </Routes>
       </div>
       <BottomNav hasActive={!!activeTimer} isPaused={isPaused} badges={mobileBadges} locked={pomodoroActive} />
-      <FloatingWidget pipWindow={pip.pipWindow} activeTimer={activeTimer} pomodoro={pomodoro} />
+      <FloatingWidget pipWindow={pip.pipWindow} activeTimer={activeTimer} pomodoro={pomodoro} simpleTimer={simpleTimer} />
     </div>
   )
 }
