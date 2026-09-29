@@ -5,6 +5,13 @@ import { POMODORO_PHASE_LABELS } from './hooks/usePomodoro'
 
 export const PIP_SUPPORTED = typeof window !== 'undefined' && 'documentPictureInPicture' in window
 
+// Die PiP-API ist an einen Secure Context gebunden (https:// oder localhost) — auf einer
+// unverschlüsselten http-Verbindung existiert `documentPictureInPicture` schlicht nicht,
+// selbst in einem Browser, der die API grundsätzlich unterstützt. Das von einer generell
+// fehlenden Browser-Unterstützung (Firefox/Safari) unterscheiden, damit der Hinweis in der
+// UI nur dort erscheint, wo https wirklich der Grund ist.
+export const PIP_NEEDS_HTTPS = typeof window !== 'undefined' && !PIP_SUPPORTED && !window.isSecureContext
+
 // Übernimmt alle Stylesheets (Google Fonts + Bundle-CSS) der Hauptseite ins PiP-Fenster,
 // damit dort dieselben CSS-Variablen/Klassen (--accent, .tag, .pulse, ...) verfügbar sind.
 function copyStyles(pipDoc) {
@@ -46,7 +53,7 @@ export function usePipWidget() {
   // Fenster schließen, wenn die Komponente, die den Hook hält, verschwindet
   useEffect(() => () => { pipWindow?.close() }, [pipWindow])
 
-  return { supported: PIP_SUPPORTED, pipWindow, open, close, toggle }
+  return { supported: PIP_SUPPORTED, needsHttps: PIP_NEEDS_HTTPS, pipWindow, open, close, toggle }
 }
 
 export default function FloatingWidget({ pipWindow, activeTimer, pomodoro, simpleTimer }) {

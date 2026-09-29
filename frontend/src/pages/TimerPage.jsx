@@ -233,12 +233,27 @@ function StartTimer({ project, setProject, description, setDescription, onStart,
 }
 
 function PipButton({ pip }) {
-  if (!pip?.supported) return null
-  return (
-    <button className="btn-icon" onClick={pip.toggle} title={pip.pipWindow ? 'Schwebendes Fenster schließen' : 'In schwebendem Fenster anzeigen'}>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor" stroke="none"/></svg>
-    </button>
-  )
+  if (pip?.supported) {
+    return (
+      <button className="btn-icon" onClick={pip.toggle} title={pip.pipWindow ? 'Schwebendes Fenster schließen' : 'In schwebendem Fenster anzeigen'}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor" stroke="none"/></svg>
+      </button>
+    )
+  }
+  // Diskreter Hinweis statt völligem Verschwinden: die PiP-API existiert nur in einem
+  // Secure Context (https/localhost) — auf http (z.B. Port 8030) fehlt sie sonst ohne
+  // jede Erklärung, obwohl derselbe Browser sie über https (Port 3443) unterstützen würde.
+  if (pip?.needsHttps) {
+    return (
+      <span
+        title="Schwebendes Fenster nur über HTTPS verfügbar (Port 3443 statt 8030)"
+        style={{ color: 'var(--text3)', cursor: 'help', display: 'inline-flex', padding: 5 }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </span>
+    )
+  }
+  return null
 }
 
 // ── Freier Timer (Stoppuhr/Countdown, ohne Task-Bezug) ──────────────────────────
