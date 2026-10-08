@@ -44,6 +44,7 @@ export default function MailPage() {
       const res = await api.triggerPoll()
       const parts = []
       if (res.parsed)  parts.push(`${res.parsed} importiert`)
+      if (res.duplicates) parts.push(`${res.duplicates} Duplikat${res.duplicates === 1 ? '' : 'e'} übersprungen`)
       if (res.skipped) parts.push(`${res.skipped} ignoriert`)
       if (res.errors)  parts.push(`${res.errors} Fehler`)
       const msg = parts.length ? parts.join(' · ') : 'Keine neuen Mails'

@@ -318,7 +318,7 @@ timetracker/
 | GET    | /api/mail/log         | Query: `limit` (default 50)           |
 | DELETE | /api/mail/log         | Löscht gesamten Mail-Log unwiderruflich |
 | GET    | /api/mail/config      | Sanitisierte Konfig (ohne Passwörter) |
-| POST   | /api/mail/poll        | Manuellen IMAP-Poll triggern, gibt `{ok, parsed, skipped, errors}` zurück |
+| POST   | /api/mail/poll        | Manuellen IMAP-Poll triggern, gibt `{ok, parsed, skipped, errors, duplicates}` zurück (`duplicates` zählt Einträge, die anderen Felder Mails) |
 
 ### Pomodoro
 | Method | Path                    | Beschreibung                                                          |
@@ -636,6 +636,11 @@ Zeilen mit `>` oder `#` werden ignoriert.
 
 **Umgebrochene/unbrochene Zeilen werden automatisch wieder in Einträge zerlegt** (`_split_mail_entries()`/`_mail_paragraphs()`, s. App-Versionshistorie 0.7.5): Viele Mail-Programme brechen lange Klartext-Zeilen beim Versand automatisch um (RFC 2822, üblich bei ~72–78 Zeichen, z.B. Thunderbird über `mailnews.wraplength`) — oder schicken den Text nach einer HTML-zu-Klartext-Konvertierung ganz ohne Zeilenumbrüche als eine einzige durchgehende Zeile. Die Mail wird zuerst in Absätze gruppiert (Grenze = Leerzeile oder `>`/`#`-Zeile), jeder Absatz zu einem String normalisiert und an jeder Stelle aufgetrennt, an der ein neuer Eintrag beginnt (Datum+Pipe). Eine Grußformel nach den Einträgen (mit Leerzeile davor) bleibt dadurch ein eigener Absatz und führt weiterhin zum erwarteten Fehler statt fälschlich angehängt zu werden. Fehlermeldungen referenzieren „Eintrag N" statt einer Zeilennummer. **Bekannte Einschränkung:** eine fehlerhafte Zeile ohne Pipe-Zeichen direkt (ohne Leerzeile) nach einem gültigen Eintrag wird still an dessen Beschreibung angehängt statt einen Fehler auszulösen.
 
+**Eine Mail darf Einträge für mehrere Tage enthalten** — das Datum gilt pro Zeile. Die Kopfzeile oben dient nur der Erklärung; in der echten Mail führt sie zu einem Fehler, dort stehen nur die Eintragszeilen.
+
+### Eingehend (IMAP) — Duplikat-Prüfung
+Vor dem Anlegen prüft `poll_imap_once()` jeden Eintrag gegen die bestehenden `time_entries`: Gibt es schon einen Eintrag mit gleicher Start- und Endzeit (UTC) und exakt gleichem Projektnamen, wird er übersprungen. Die Beschreibung und die Quelle des vorhandenen Eintrags (Timer, manuell, E-Mail) spielen keine Rolle. Doppelte Zeilen innerhalb derselben Mail werden ebenso erkannt (eigenes `seen`-Set, da die Session mit `autoflush=False` läuft und noch nicht committete Einträge per Query nicht sieht). Der Rest der Mail wird normal importiert, die Mail gilt als `parsed` und wird vom Server gelöscht, auch wenn alle Einträge Duplikate waren. Mail-Log: „2 Eintrag/Einträge erstellt, 1 Duplikat(e) übersprungen". Überschneidende, aber nicht identische Zeiträume werden **nicht** erkannt.
+
 Erfolgreich verarbeitete Mails (`parsed`) werden auf dem IMAP-Server per `\Deleted`-Flag + `expunge()` endgültig gelöscht statt nur als gelesen markiert. Mails mit `skipped`/`error`-Status bleiben im Postfach (als gelesen markiert) für Debugging erhalten.
 
 ### Fehlerbehandlung — Alles-oder-nichts
@@ -800,8 +805,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.11.2**
-**Aktuelle Doku-Version: v4.40**
+**Aktuelle App-Version: 0.12.0**
+**Aktuelle Doku-Version: v4.41**
 
 ### App-Versionshistorie
 
@@ -833,6 +838,7 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.11.0  | Feature: Freier Timer — dritter, komplett vom Tracking losgelöster Timer (Stoppuhr/Countdown, kein Backend, `localStorage`-State via neuem `useSimpleTimer.js`). Nur Start/Reset, zählt bei `targetSeconds=0` hoch (Stoppuhr) sonst runter bis 0 und wird dann rot (Karte, PiP-Widget, Favicon, Tab-Titel). Teilt sich das bestehende PiP-Fenster mit Timer/Pomodoro (s. „Freier Timer im Detail") |
 | 0.11.1  | Fix/Politur zu 0.11.0: `FreeTimerSection` zeigt im Leerlauf nur noch eine schmale, eingeklappte Zeile statt der vollen Karte (klappt bei Klick/Start auf), Farbe/Rahmen jetzt neutral statt Akzent-Grün + dauerhafter Hinweistext „Zählt nicht zur Zeiterfassung", damit der freie Timer optisch nicht mit erfasster Arbeitszeit verwechselt wird |
 | 0.11.2  | Fix: `PipButton` zeigt auf einer unverschlüsselten HTTP-Verbindung außerhalb von `localhost` jetzt ein Schloss-Icon mit HTTPS-Hinweis statt komplett zu verschwinden — neues `PIP_NEEDS_HTTPS`-Flag (`FloatingWidget.jsx`) unterscheidet „braucht nur HTTPS" von „Browser kann das grundsätzlich nicht" (Firefox/Safari bleiben weiterhin still) |
+| 0.12.0  | Feature: Duplikat-Prüfung beim Mail-Import — Einträge mit gleicher Start-/Endzeit und gleichem Projekt wie ein bestehender Eintrag (oder eine frühere Zeile derselben Mail) werden übersprungen statt doppelt angelegt, Anzahl steht im Mail-Log und im Poll-Ergebnis (`duplicates`) auf der Mail-Seite (s. „Eingehend (IMAP) — Duplikat-Prüfung") |
 
 ### Doku-Versionshistorie
 
@@ -891,3 +897,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.38   | „Freier Timer im Detail" um eingeklappten Leerlauf-Zustand und optische Abgrenzung vom Tracking ergänzt (s. App-Versionshistorie 0.11.1) |
 | v4.39   | „Schwebendes Fenster im Detail" und „Bekannte Einschränkungen" um Secure-Context-Hinweis (Schloss-Icon statt stillem Verschwinden) ergänzt (s. App-Versionshistorie 0.11.2) |
 | v4.40   | Neuer Abschnitt „Schreibstil — typische KI-Formulierungen vermeiden" am Dateianfang (Stilvorgabe für Antworten, Commits, Doku, UI-Texte) |
+| v4.41   | Neuer Abschnitt „Eingehend (IMAP) — Duplikat-Prüfung", Hinweis auf mehrere Tage pro Mail und dass die Kopfzeile nicht mitgeschickt werden darf, `/api/mail/poll`-Rückgabe um `duplicates` ergänzt (s. App-Versionshistorie 0.12.0) |
