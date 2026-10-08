@@ -1076,6 +1076,13 @@ class MailParseError(Exception):
         )
 
 
+class MailConflictError(MailParseError):
+    """Eintrag ist formal gültig, kollidiert aber zeitlich (Ende vor Start oder
+    Überschneidung mit einem bestehenden Eintrag bzw. einer anderen Zeile)."""
+    def user_message(self) -> str:
+        return f"Eintrag {self.entry_no}: {self.reason}\n  Inhalt: {self.line}"
+
+
 def _diagnose_line(line: str) -> str:
     """Return a specific error reason for a line that failed full validation."""
     pipes = PIPE_COUNT_RE.findall(line)
@@ -1192,6 +1199,8 @@ def _parse_mail_body(text: str, fallback_date: date) -> list:
                     f"Spalte {col} ({label}) ungültige Uhrzeit: '{val}' — erwartet HH:MM (00:00–23:59)")
 
         results.append({
+            "no":          entry_no,
+            "line":        line,
             "date":        entry_date,
             "start":       start_s.strip(),
             "end":         end_s.strip(),
@@ -1199,6 +1208,65 @@ def _parse_mail_body(text: str, fallback_date: date) -> list:
             "description": description.strip(),
         })
     return results
+
+
+def _check_mail_conflicts(db: Session, entries: list) -> tuple:
+    """Rechnet die Mail-Uhrzeiten nach UTC um und prüft jeden Eintrag gegen die
+    bestehenden time_entries und gegen die übrigen Zeilen der Mail.
+
+    - Exaktes Duplikat (gleiche Start-/Endzeit, gleiches Projekt) → übersprungen,
+      z.B. wenn dieselbe Mail zweimal geschickt wurde.
+    - Ende vor Start oder Überschneidung mit einem anderen Zeitraum → MailConflictError,
+      die komplette Mail wird abgelehnt (Alles-oder-nichts wie bei Formatfehlern).
+      Aneinanderstoßende Zeiträume (Ende = Start des nächsten) sind erlaubt.
+
+    Uhrzeiten aus der Mail sind Europe/Berlin-Ortszeit (der Nutzer tippt "09:00"
+    und meint 9 Uhr deutscher Zeit), die DB speichert durchgehend UTC (vgl.
+    localTimeToUTC im Frontend für manuelle Einträge).
+
+    Gibt (neu anzulegende Einträge mit start_dt/end_dt, Anzahl Duplikate) zurück."""
+    new_entries, dupes = [], 0
+    for ep in entries:
+        start_dt = _local_hhmm_to_utc(ep["date"], ep["start"])
+        end_dt   = _local_hhmm_to_utc(ep["date"], ep["end"])
+        if end_dt < start_dt:
+            raise MailConflictError(ep["no"], ep["line"],
+                f"Ende ({ep['end']}) liegt vor Start ({ep['start']}) — Einträge über "
+                f"Mitternacht bitte in zwei Zeilen aufteilen")
+
+        if any(n["start_dt"] == start_dt and n["end_dt"] == end_dt and n["project"] == ep["project"]
+               for n in new_entries) or db.query(TimeEntry.id).filter(
+                   TimeEntry.start_time == start_dt,
+                   TimeEntry.end_time == end_dt,
+                   TimeEntry.project == ep["project"],
+               ).first():
+            dupes += 1
+            continue
+
+        for n in new_entries:
+            if n["start_dt"] < end_dt and start_dt < n["end_dt"]:
+                raise MailConflictError(ep["no"], ep["line"],
+                    f"Überschneidet sich mit Eintrag {n['no']} dieser Mail "
+                    f"({n['start']}–{n['end']} {n['project']})")
+
+        hit = db.query(TimeEntry).filter(
+            TimeEntry.end_time.isnot(None),
+            TimeEntry.start_time < end_dt,
+            TimeEntry.end_time > start_dt,
+        ).order_by(TimeEntry.start_time).first()
+        if hit:
+            raise MailConflictError(ep["no"], ep["line"],
+                f"Überschneidet sich mit bestehendem Eintrag am {_fmt_local(hit.start_time, '%Y-%m-%d')} "
+                f"{_fmt_local(hit.start_time, '%H:%M')}–{_fmt_local(hit.end_time, '%H:%M')} "
+                f"{hit.project}" + (f" ({hit.description})" if hit.description else ""))
+
+        new_entries.append({**ep, "start_dt": start_dt, "end_dt": end_dt})
+    return new_entries, dupes
+
+
+def _fmt_local(utc_dt: datetime, fmt: str) -> str:
+    """Naives UTC-datetime aus der DB als Europe/Berlin-Ortszeit formatieren."""
+    return utc_dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(LOCAL_TZ).strftime(fmt)
 
 
 def _get_mail_text(msg) -> str:
@@ -1279,6 +1347,7 @@ def poll_imap_once():
                 # Parse – any error rejects the entire mail
                 try:
                     entries = _parse_mail_body(full_text, mail_date)
+                    new_entries, dupes = _check_mail_conflicts(db, entries)
                 except MailParseError as parse_err:
                     err_detail = parse_err.user_message()
                     log.warning(f"Mail abgelehnt: {err_detail}")
@@ -1309,37 +1378,14 @@ def poll_imap_once():
                     continue
 
                 # All entries valid – commit all at once
-                # Uhrzeiten aus der Mail sind Europe/Berlin-Ortszeit (der Nutzer
-                # tippt "09:00" und meint 9 Uhr deutscher Zeit) und müssen erst
-                # nach UTC umgerechnet werden, bevor sie in die DB geschrieben
-                # werden — die DB speichert durchgehend UTC (vgl. localTimeToUTC
-                # im Frontend für manuelle Einträge).
-                # Duplikat-Prüfung: ein Eintrag mit gleicher Start-/Endzeit und
-                # gleichem Projekt (egal aus welcher Quelle, auch innerhalb
-                # derselben Mail) wird übersprungen statt doppelt angelegt —
-                # z.B. wenn dieselbe Mail versehentlich zweimal geschickt wurde.
-                created = dupes = 0
-                seen = set()
-                for ep in entries:
-                    start_dt = _local_hhmm_to_utc(ep["date"], ep["start"])
-                    end_dt   = _local_hhmm_to_utc(ep["date"], ep["end"])
-                    dur      = _calc_duration(start_dt, end_dt)
-                    key = (start_dt, end_dt, ep["project"])
-                    exists = db.query(TimeEntry.id).filter(
-                        TimeEntry.start_time == start_dt,
-                        TimeEntry.end_time == end_dt,
-                        TimeEntry.project == ep["project"],
-                    ).first()
-                    if key in seen or exists:
-                        dupes += 1
-                        continue
-                    seen.add(key)
+                for ep in new_entries:
                     db.add(TimeEntry(
-                        start_time=start_dt, end_time=end_dt, duration_minutes=dur,
-                        date=start_dt.date(), project=ep["project"],
+                        start_time=ep["start_dt"], end_time=ep["end_dt"],
+                        duration_minutes=_calc_duration(ep["start_dt"], ep["end_dt"]),
+                        date=ep["start_dt"].date(), project=ep["project"],
                         description=ep["description"], source=2,
                     ))
-                    created += 1
+                created = len(new_entries)
                 db.commit()
                 detail = f"{created} Eintrag/Einträge erstellt"
                 if dupes:

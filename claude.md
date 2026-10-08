@@ -638,8 +638,9 @@ Zeilen mit `>` oder `#` werden ignoriert.
 
 **Eine Mail darf Einträge für mehrere Tage enthalten** — das Datum gilt pro Zeile. Die Kopfzeile oben dient nur der Erklärung; in der echten Mail führt sie zu einem Fehler, dort stehen nur die Eintragszeilen.
 
-### Eingehend (IMAP) — Duplikat-Prüfung
-Vor dem Anlegen prüft `poll_imap_once()` jeden Eintrag gegen die bestehenden `time_entries`: Gibt es schon einen Eintrag mit gleicher Start- und Endzeit (UTC) und exakt gleichem Projektnamen, wird er übersprungen. Die Beschreibung und die Quelle des vorhandenen Eintrags (Timer, manuell, E-Mail) spielen keine Rolle. Doppelte Zeilen innerhalb derselben Mail werden ebenso erkannt (eigenes `seen`-Set, da die Session mit `autoflush=False` läuft und noch nicht committete Einträge per Query nicht sieht). Der Rest der Mail wird normal importiert, die Mail gilt als `parsed` und wird vom Server gelöscht, auch wenn alle Einträge Duplikate waren. Mail-Log: „2 Eintrag/Einträge erstellt, 1 Duplikat(e) übersprungen". Überschneidende, aber nicht identische Zeiträume werden **nicht** erkannt.
+### Eingehend (IMAP) — Duplikate und Überschneidungen
+Vor dem Anlegen prüft `_check_mail_conflicts()` (aufgerufen aus `poll_imap_once()`) jeden Eintrag gegen die bestehenden `time_entries`: Gibt es schon einen Eintrag mit gleicher Start- und Endzeit (UTC) und exakt gleichem Projektnamen, wird er übersprungen. Die Beschreibung und die Quelle des vorhandenen Eintrags (Timer, manuell, E-Mail) spielen keine Rolle. Doppelte Zeilen innerhalb derselben Mail werden ebenso erkannt (Abgleich mit der Liste der bereits geprüften Zeilen, da die Session mit `autoflush=False` läuft und noch nicht committete Einträge per Query nicht sieht). Der Rest der Mail wird normal importiert, die Mail gilt als `parsed` und wird vom Server gelöscht, auch wenn alle Einträge Duplikate waren. Mail-Log: „2 Eintrag/Einträge erstellt, 1 Duplikat(e) übersprungen". 
+**Überschneidungen lehnen die ganze Mail ab** (seit 0.13.0, Alles-oder-nichts wie bei Formatfehlern): Überlappt ein Eintrag, der kein exaktes Duplikat ist, mit einem abgeschlossenen Eintrag in der DB oder mit einer anderen Zeile derselben Mail, wirft `_check_mail_conflicts()` eine `MailConflictError` (Unterklasse von `MailParseError`). Damit greift derselbe Fehlerpfad wie bei Formatfehlern: Mail-Log `error`, Fehler-Mail an den Absender, Mail bleibt im Postfach. Die Meldung nennt den kollidierenden Eintrag, z.B. „Eintrag 2: Überschneidet sich mit bestehendem Eintrag am 2026-10-06 09:00–12:00 Support (Tickets)" (Uhrzeiten in Europe/Berlin). Aneinanderstoßende Zeiträume (Ende 12:00, nächster Start 12:00) gelten nicht als Überschneidung. Gleiche Zeiten mit anderem Projekt sind eine Überschneidung, kein Duplikat. Ein laufender Timer (`end_time` NULL) wird nicht geprüft. Ende vor Start (z.B. `22:00 | 02:00`) ergibt ebenfalls eine `MailConflictError` mit dem Hinweis, den Eintrag an Mitternacht in zwei Zeilen zu teilen; bisher landete das als unspezifischer Fehler „?" im Mail-Log.
 
 Erfolgreich verarbeitete Mails (`parsed`) werden auf dem IMAP-Server per `\Deleted`-Flag + `expunge()` endgültig gelöscht statt nur als gelesen markiert. Mails mit `skipped`/`error`-Status bleiben im Postfach (als gelesen markiert) für Debugging erhalten.
 
@@ -805,8 +806,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 - **Fix/Kleinigkeit ohne neues Feature** → nur PATCH hoch (z.B. `0.2.0` → `0.2.1`)
 - **MAJOR** (`1.0.0` etc.) → nie eigenmächtig, vorher immer beim Nutzer nachfragen
 
-**Aktuelle App-Version: 0.12.0**
-**Aktuelle Doku-Version: v4.41**
+**Aktuelle App-Version: 0.13.0**
+**Aktuelle Doku-Version: v4.42**
 
 ### App-Versionshistorie
 
@@ -838,7 +839,8 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | 0.11.0  | Feature: Freier Timer — dritter, komplett vom Tracking losgelöster Timer (Stoppuhr/Countdown, kein Backend, `localStorage`-State via neuem `useSimpleTimer.js`). Nur Start/Reset, zählt bei `targetSeconds=0` hoch (Stoppuhr) sonst runter bis 0 und wird dann rot (Karte, PiP-Widget, Favicon, Tab-Titel). Teilt sich das bestehende PiP-Fenster mit Timer/Pomodoro (s. „Freier Timer im Detail") |
 | 0.11.1  | Fix/Politur zu 0.11.0: `FreeTimerSection` zeigt im Leerlauf nur noch eine schmale, eingeklappte Zeile statt der vollen Karte (klappt bei Klick/Start auf), Farbe/Rahmen jetzt neutral statt Akzent-Grün + dauerhafter Hinweistext „Zählt nicht zur Zeiterfassung", damit der freie Timer optisch nicht mit erfasster Arbeitszeit verwechselt wird |
 | 0.11.2  | Fix: `PipButton` zeigt auf einer unverschlüsselten HTTP-Verbindung außerhalb von `localhost` jetzt ein Schloss-Icon mit HTTPS-Hinweis statt komplett zu verschwinden — neues `PIP_NEEDS_HTTPS`-Flag (`FloatingWidget.jsx`) unterscheidet „braucht nur HTTPS" von „Browser kann das grundsätzlich nicht" (Firefox/Safari bleiben weiterhin still) |
-| 0.12.0  | Feature: Duplikat-Prüfung beim Mail-Import — Einträge mit gleicher Start-/Endzeit und gleichem Projekt wie ein bestehender Eintrag (oder eine frühere Zeile derselben Mail) werden übersprungen statt doppelt angelegt, Anzahl steht im Mail-Log und im Poll-Ergebnis (`duplicates`) auf der Mail-Seite (s. „Eingehend (IMAP) — Duplikat-Prüfung") |
+| 0.12.0  | Feature: Duplikat-Prüfung beim Mail-Import — Einträge mit gleicher Start-/Endzeit und gleichem Projekt wie ein bestehender Eintrag (oder eine frühere Zeile derselben Mail) werden übersprungen statt doppelt angelegt, Anzahl steht im Mail-Log und im Poll-Ergebnis (`duplicates`) auf der Mail-Seite (s. „Eingehend (IMAP) — Duplikate und Überschneidungen") |
+| 0.13.0  | Feature: Mail-Import erkennt Überschneidungen — ein Eintrag, der sich mit einem bestehenden abgeschlossenen Eintrag oder einer anderen Zeile derselben Mail überlappt, lehnt die ganze Mail ab (neue `MailConflictError`, Fehler-Mail nennt den kollidierenden Eintrag). Prüfung zusammen mit der Duplikat-Erkennung in `_check_mail_conflicts()`. Nebenbei: Ende vor Start gibt jetzt eine verständliche Fehlermeldung statt „?" im Mail-Log (s. „Eingehend (IMAP) — Duplikate und Überschneidungen") |
 
 ### Doku-Versionshistorie
 
@@ -898,3 +900,4 @@ Bis `v4.12`/App-Anzeige `v4.12` liefen beide Zähler synchron (ein gemeinsamer Z
 | v4.39   | „Schwebendes Fenster im Detail" und „Bekannte Einschränkungen" um Secure-Context-Hinweis (Schloss-Icon statt stillem Verschwinden) ergänzt (s. App-Versionshistorie 0.11.2) |
 | v4.40   | Neuer Abschnitt „Schreibstil — typische KI-Formulierungen vermeiden" am Dateianfang (Stilvorgabe für Antworten, Commits, Doku, UI-Texte) |
 | v4.41   | Neuer Abschnitt „Eingehend (IMAP) — Duplikat-Prüfung", Hinweis auf mehrere Tage pro Mail und dass die Kopfzeile nicht mitgeschickt werden darf, `/api/mail/poll`-Rückgabe um `duplicates` ergänzt (s. App-Versionshistorie 0.12.0) |
+| v4.42   | Abschnitt „Eingehend (IMAP) — Duplikat-Prüfung" umbenannt in „Duplikate und Überschneidungen" und um Überschneidungs-Prüfung und Ende-vor-Start-Fehler ergänzt (s. App-Versionshistorie 0.13.0) |
