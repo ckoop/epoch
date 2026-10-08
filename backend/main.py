@@ -1227,7 +1227,7 @@ def _log_mail(db: Session, direction: str, subject: str, status: str, detail: st
 def poll_imap_once():
     """Synchronously poll IMAP for new messages. Called from background thread
     and from the manual /api/mail/poll trigger. Returns a summary dict."""
-    summary = {"parsed": 0, "skipped": 0, "errors": 0}
+    summary = {"parsed": 0, "skipped": 0, "errors": 0, "duplicates": 0}
 
     cfg = imap_cfg()
     if not cfg["host"] or not cfg["user"]:
@@ -1314,18 +1314,38 @@ def poll_imap_once():
                 # nach UTC umgerechnet werden, bevor sie in die DB geschrieben
                 # werden — die DB speichert durchgehend UTC (vgl. localTimeToUTC
                 # im Frontend für manuelle Einträge).
+                # Duplikat-Prüfung: ein Eintrag mit gleicher Start-/Endzeit und
+                # gleichem Projekt (egal aus welcher Quelle, auch innerhalb
+                # derselben Mail) wird übersprungen statt doppelt angelegt —
+                # z.B. wenn dieselbe Mail versehentlich zweimal geschickt wurde.
+                created = dupes = 0
+                seen = set()
                 for ep in entries:
                     start_dt = _local_hhmm_to_utc(ep["date"], ep["start"])
                     end_dt   = _local_hhmm_to_utc(ep["date"], ep["end"])
                     dur      = _calc_duration(start_dt, end_dt)
+                    key = (start_dt, end_dt, ep["project"])
+                    exists = db.query(TimeEntry.id).filter(
+                        TimeEntry.start_time == start_dt,
+                        TimeEntry.end_time == end_dt,
+                        TimeEntry.project == ep["project"],
+                    ).first()
+                    if key in seen or exists:
+                        dupes += 1
+                        continue
+                    seen.add(key)
                     db.add(TimeEntry(
                         start_time=start_dt, end_time=end_dt, duration_minutes=dur,
                         date=start_dt.date(), project=ep["project"],
                         description=ep["description"], source=2,
                     ))
+                    created += 1
                 db.commit()
-                _log_mail(db, "in", subject, "parsed",
-                          f"{len(entries)} Eintrag/Einträge erstellt")
+                detail = f"{created} Eintrag/Einträge erstellt"
+                if dupes:
+                    detail += f", {dupes} Duplikat(e) übersprungen"
+                _log_mail(db, "in", subject, "parsed", detail)
+                summary["duplicates"] += dupes
                 # Erfolgreich verarbeitet — Mail vom Server löschen statt nur als gelesen zu markieren
                 imap.store(uid, "+FLAGS", "\\Deleted")
                 summary["parsed"] += 1
